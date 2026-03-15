@@ -20,11 +20,46 @@ This project upgrades your notebook prototype into a complete ML workflow with:
 
 ## Quick Start
 
-1. Create a Python environment and install dependencies from `requirements.txt`.
-2. Launch Streamlit app:
-   - `streamlit run app/streamlit_app.py`
-3. Launch API:
-   - `uvicorn app.api:app --reload`
+### Requirements
+
+- Python **3.10+**
+- `pip`
+
+### 1. Create and activate a virtual environment
+
+From the project root, create a virtual environment:
+
+- Linux/macOS:
+   - `python3 -m venv .venv`
+   - `source .venv/bin/activate`
+- Windows (PowerShell):
+   - `python -m venv .venv`
+   - `.venv\Scripts\Activate.ps1`
+
+After activation, you should see your shell prompt prefixed with `(.venv)`.
+
+### 2. Install the required packages
+
+Install the project dependencies with:
+
+- `pip install --upgrade pip`
+- `pip install -r requirements.txt`
+
+### 3. Run the Streamlit app
+
+Start the interactive dashboard with:
+
+- `streamlit run app/streamlit_app.py`
+
+Streamlit will print a local URL in the terminal, usually `http://localhost:8501`.
+
+### 4. Run the FastAPI service (optional)
+
+If you want to use the API instead of, or alongside, the dashboard, run:
+
+- `uvicorn app.api:app --reload`
+
+The API will usually be available at `http://127.0.0.1:8000`, and the interactive docs at `http://127.0.0.1:8000/docs`.
 
 ## API Endpoints
 - `GET /health`
