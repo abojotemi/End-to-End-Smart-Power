@@ -1,16 +1,31 @@
 from __future__ import annotations
 
 
+import sys
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from power_forecast.config import ARTIFACT_PATH
-from power_forecast.pipeline import (
-    load_artifacts,
-    predict_next_hour,
-)
-from power_forecast.train import run_training
+try:
+    from src.config import ARTIFACT_PATH
+    from src.pipeline import (
+        load_artifacts,
+        predict_next_hour,
+    )
+    from src.train import run_training
+except ModuleNotFoundError:
+    ROOT_DIR = Path(__file__).resolve().parents[1]
+    if str(ROOT_DIR) not in sys.path:
+        sys.path.insert(0, str(ROOT_DIR))
+
+    from src.config import ARTIFACT_PATH
+    from src.pipeline import (
+        load_artifacts,
+        predict_next_hour,
+    )
+    from src.train import run_training
 
 st.set_page_config(page_title="Smart Power Usage Forecast", layout="wide")
 st.title("Smart Power Usage Forecasting Dashboard")
@@ -30,9 +45,12 @@ def load_or_train(force_retrain: bool = False):
         with st.spinner("Training models..."):
             return run_training()
     return load_artifacts(ARTIFACT_PATH)
+
+
 artifact = None
 try:
     artifact = load_or_train(force_retrain=run_training_clicked)
+
 except Exception as exc:
     st.error(f"Failed to load/train pipeline: {exc}")
     st.stop()

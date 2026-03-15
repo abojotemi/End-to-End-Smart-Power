@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 
-from power_forecast.config import ARTIFACT_PATH
-from power_forecast.pipeline import load_artifacts, predict_next_hour
-from power_forecast.train import run_training
+from src.config import ARTIFACT_PATH
+from src.pipeline import load_artifacts, predict_next_hour
+from src.train import run_training
 
 app = FastAPI(title="Smart Power Forecast API", version="1.0.0")
 

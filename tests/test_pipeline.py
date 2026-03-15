@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from power_forecast.pipeline import (
+from src.pipeline import (
     build_model_frame,
     load_raw_data,
     preprocess_hourly,
