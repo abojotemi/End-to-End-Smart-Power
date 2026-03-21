@@ -133,25 +133,32 @@ with inference_tab1:
     st.write(
         "Select a date from the test set to see what the model predicted vs. actual value."
     )
-    
+
     if not comparison_df.empty:
-        available_dates = comparison_df.index.tolist()
-        selected_date = st.selectbox(
-            "Select a date",
-            available_dates,
-            format_func=lambda x: str(x),
+        comparison_options = comparison_df[["datetime", "actual", "predicted"]].copy()
+        comparison_options["datetime"] = pd.to_datetime(
+            comparison_options["datetime"], errors="coerce"
         )
-        
-        if selected_date:
-            actual_value = comparison_df.loc[selected_date, "actual"]
-            predicted_value = comparison_df.loc[selected_date, "predicted"]
+        comparison_options = comparison_options.dropna(subset=["datetime"])
+
+        option_labels = comparison_options["datetime"].dt.strftime("%Y-%m-%d %H:%M")
+        selected_idx = st.selectbox(
+            "Select timestamp",
+            options=option_labels.index.tolist(),
+            format_func=lambda i: option_labels.loc[i],
+        )
+
+        selected_row = comparison_options.loc[selected_idx]
+        if not selected_row.empty:
+            actual_value = float(selected_row["actual"])
+            predicted_value = float(selected_row["predicted"])
             is_peak = actual_value >= artifact["peak_threshold"]
-            
+
             col1, col2, col3 = st.columns(3)
             col1.metric("Actual Power (kW)", f"{actual_value:.3f}")
             col2.metric("Predicted Power (kW)", f"{predicted_value:.3f}")
             col3.metric("Error (kW)", f"{abs(actual_value - predicted_value):.3f}")
-            
+
             st.metric("Peak Period?", "Yes 🔴" if is_peak else "No 🟢")
 
 with inference_tab2:
