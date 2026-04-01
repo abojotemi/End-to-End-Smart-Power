@@ -10,7 +10,7 @@ from .config import (
 from .pipeline import (
     build_model_frame,
     load_raw_data,
-    predict_next_hour,
+    predict_next_6_hours,
     preprocess_hourly,
     save_artifacts,
     train_and_evaluate,
@@ -22,7 +22,7 @@ def run_training() -> dict:
     df_hourly = preprocess_hourly(raw_df)
     model_df = build_model_frame(df_hourly)
 
-    trained = train_and_evaluate(model_df)
+    trained = train_and_evaluate(model_df, df_hourly)
 
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     trained["results_df"].to_csv(METRICS_PATH, index=False)
@@ -35,7 +35,7 @@ def run_training() -> dict:
 
 if __name__ == "__main__":
     output = run_training()
-    next_hour = predict_next_hour(output)
+    next_6h = predict_next_6_hours(output)
 
     print("Training complete.")
     print(f"Best model: {output['best_model_name']}")
@@ -44,5 +44,5 @@ if __name__ == "__main__":
     print(f"- {METRICS_PATH}")
     print(f"- {COMPARISON_PATH}")
     print(f"- {PEAK_PERIODS_PATH}")
-    print("Next-hour forecast:")
-    print(next_hour)
+    print("Next-6-hour forecast and peak-hour recommendation:")
+    print(next_6h)

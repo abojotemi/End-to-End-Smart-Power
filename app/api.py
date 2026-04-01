@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 
 from src.config import ARTIFACT_PATH
-from src.pipeline import load_artifacts, predict_next_hour
+from src.pipeline import load_artifacts, predict_next_6_hours
 from src.train import run_training
 
 app = FastAPI(title="Smart Power Forecast API", version="1.0.0")
@@ -38,7 +38,19 @@ def forecast_next() -> dict:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return predict_next_hour(artifact)
+    return predict_next_6_hours(artifact)
+
+
+@app.get("/forecast/next6h")
+def forecast_next_6h() -> dict:
+    try:
+        artifact = load_artifacts(ARTIFACT_PATH)
+    except FileNotFoundError:
+        artifact = run_training()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return predict_next_6_hours(artifact)
 
 
 @app.get("/metrics")

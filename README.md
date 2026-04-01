@@ -3,7 +3,7 @@
 This project upgrades your notebook prototype into a complete ML workflow with:
 
 - **Data preprocessing + feature engineering**
-- **Model training and comparison** (Linear Regression, Random Forest, Gradient Boosting)
+- **Model training and comparison** (Deep MLP models + weighted ensemble + baselines)
 - **Saved artifacts** for reuse
 - **Streamlit dashboard** for interactive analytics
 - **FastAPI service** for programmatic forecasts
@@ -65,9 +65,11 @@ The API will usually be available at `http://127.0.0.1:8000`, and the interactiv
 - `GET /health`
 - `POST /train?data_path=...`
 - `GET /forecast/next`
+- `GET /forecast/next6h`
 - `GET /metrics`
 
 ## Notes
 
-- The model predicts **next-hour global active power (kW)**.
+- The main regressor predicts **next 6-hour average global active power (kW)**.
 - Peak-demand detection uses the **90th percentile** of actual values in the test window.
+- A daily peak-hour model predicts the **most likely highest-load hour for the next day** (useful for backup power scheduling).
