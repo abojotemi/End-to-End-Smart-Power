@@ -8,7 +8,7 @@ from src.pipeline import (
 )
 
 
-def _make_synthetic_raw_data(days: int = 10) -> pd.DataFrame:
+def _make_synthetic_raw_data(days: int = 90) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     idx = pd.date_range("2024-01-01", periods=days * 24 * 60, freq="min")
 

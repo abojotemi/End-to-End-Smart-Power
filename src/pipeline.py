@@ -6,7 +6,12 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestClassifier
+from sklearn.ensemble import (
+    ExtraTreesClassifier,
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+    RandomForestClassifier,
+)
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -18,7 +23,7 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .config import RANDOM_STATE
+from .config import DATA_DIR, RANDOM_STATE
 
 NUMERIC_COLS = [
     "Global_active_power",
@@ -32,13 +37,31 @@ NUMERIC_COLS = [
 
 DEFAULT_FORECAST_HORIZON = 6
 ENSEMBLE_MODEL_NAME = "Weighted Ensemble"
+DATASET_FILENAME = "household_power_consumption.csv"
+DEFAULT_DATASET_PATH = DATA_DIR / DATASET_FILENAME
 
 
-def load_raw_data() -> pd.DataFrame:
+def _read_local_dataset(csv_path: Path) -> pd.DataFrame:
+    return pd.read_csv(csv_path, sep=";", na_values=["?"])
+
+
+def load_raw_data(data_path: Path | str | None = None) -> pd.DataFrame:
+    if data_path is not None:
+        csv_path = Path(data_path)
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Data file not found: {csv_path}")
+        return _read_local_dataset(csv_path)
+
+    if DEFAULT_DATASET_PATH.exists():
+        return _read_local_dataset(DEFAULT_DATASET_PATH)
+
     from ucimlrepo import fetch_ucirepo
 
-    # fetch dataset
-    return fetch_ucirepo(id=235).data.features  # type: ignore
+    dataset = fetch_ucirepo(id=235)
+    features = dataset.data.features if dataset.data is not None else None
+    if features is None:
+        raise RuntimeError("UCI dataset fetch returned no feature data")
+    return features.copy()
 
 
 def preprocess_hourly(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -92,6 +115,8 @@ def build_model_frame(
 
     model_df["hour_sin"] = np.sin(2 * np.pi * model_df["hour"] / 24.0)
     model_df["hour_cos"] = np.cos(2 * np.pi * model_df["hour"] / 24.0)
+    model_df["dow_sin"] = np.sin(2 * np.pi * model_df["day_of_week"] / 7.0)
+    model_df["dow_cos"] = np.cos(2 * np.pi * model_df["day_of_week"] / 7.0)
 
     for lag in [1, 2, 3, 6, 12, 24, 48]:
         model_df[f"power_lag_{lag}"] = model_df["Global_active_power"].shift(lag)
@@ -102,12 +127,21 @@ def build_model_frame(
         model_df[f"power_roll_mean_{window}"] = (
             model_df["Global_active_power"].rolling(window).mean()
         )
+        model_df[f"power_roll_min_{window}"] = (
+            model_df["Global_active_power"].rolling(window).min()
+        )
+        model_df[f"power_roll_max_{window}"] = (
+            model_df["Global_active_power"].rolling(window).max()
+        )
         model_df[f"power_roll_std_{window}"] = (
             model_df["Global_active_power"].rolling(window).std()
         )
         model_df[f"current_roll_mean_{window}"] = (
             model_df["Global_intensity"].rolling(window).mean()
         )
+
+    model_df["power_ewm_6"] = model_df["Global_active_power"].ewm(span=6).mean()
+    model_df["power_ewm_24"] = model_df["Global_active_power"].ewm(span=24).mean()
 
     return model_df.dropna()
 
@@ -134,6 +168,10 @@ def build_daily_peak_frame(df_hourly: pd.DataFrame) -> pd.DataFrame:
     for col in ["day_mean", "day_max", "day_std"]:
         daily_stats[f"prev_{col}"] = daily_stats[col].shift(1)
 
+    daily_stats["peak_hour_lag_1"] = daily_stats["peak_hour"].shift(1)
+    daily_stats["peak_hour_sin"] = np.sin(2 * np.pi * daily_stats["peak_hour"] / 24.0)
+    daily_stats["peak_hour_cos"] = np.cos(2 * np.pi * daily_stats["peak_hour"] / 24.0)
+
     return daily_stats.dropna()
 
 
@@ -145,6 +183,24 @@ def _build_models() -> dict[str, Any]:
                 ("model", LinearRegression()),
             ]
         ),
+        "MLP Wide": Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                (
+                    "model",
+                    MLPRegressor(
+                        hidden_layer_sizes=(192, 96),
+                        activation="relu",
+                        solver="adam",
+                        alpha=8e-5,
+                        learning_rate_init=9e-4,
+                        max_iter=700,
+                        early_stopping=True,
+                        random_state=RANDOM_STATE,
+                    ),
+                ),
+            ]
+        ),
         "MLP Compact": Pipeline(
             [
                 ("scaler", StandardScaler()),
@@ -154,9 +210,9 @@ def _build_models() -> dict[str, Any]:
                         hidden_layer_sizes=(64, 32),
                         activation="relu",
                         solver="adam",
-                        alpha=1e-4,
-                        learning_rate_init=1e-3,
-                        max_iter=500,
+                        alpha=8e-5,
+                        learning_rate_init=8e-4,
+                        max_iter=700,
                         early_stopping=True,
                         random_state=RANDOM_STATE,
                     ),
@@ -172,9 +228,9 @@ def _build_models() -> dict[str, Any]:
                         hidden_layer_sizes=(128, 64, 32),
                         activation="relu",
                         solver="adam",
-                        alpha=5e-5,
-                        learning_rate_init=8e-4,
-                        max_iter=600,
+                        alpha=1e-5,
+                        learning_rate_init=6e-4,
+                        max_iter=900,
                         early_stopping=True,
                         random_state=RANDOM_STATE,
                     ),
@@ -223,6 +279,45 @@ def _predict_with_selected_model(
 
     model = artifact["best_model"]
     return model.predict(features)
+
+
+def _build_peak_models() -> dict[str, Any]:
+    return {
+        "RandomForest": RandomForestClassifier(
+            n_estimators=450,
+            max_depth=None,
+            min_samples_leaf=1,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        ),
+        "ExtraTrees": ExtraTreesClassifier(
+            n_estimators=500,
+            max_depth=None,
+            min_samples_leaf=1,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        ),
+        "GradientBoosting": GradientBoostingClassifier(
+            n_estimators=250,
+            learning_rate=0.05,
+            max_depth=3,
+            random_state=RANDOM_STATE,
+        ),
+    }
+
+
+def _weighted_majority_vote(
+    model_probs: dict[str, np.ndarray],
+    weights: dict[str, float],
+) -> np.ndarray:
+    combined = None
+    for name, probs in model_probs.items():
+        weighted_probs = weights[name] * probs
+        combined = weighted_probs if combined is None else combined + weighted_probs
+
+    if combined is None:
+        return np.array([], dtype=int)
+    return np.argmax(combined, axis=1)
 
 
 def train_and_evaluate(
@@ -315,14 +410,36 @@ def train_and_evaluate(
         y_peak.iloc[peak_split_idx:],
     )
 
-    peak_model = RandomForestClassifier(
-        n_estimators=300,
-        min_samples_leaf=1,
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
+    peak_models = _build_peak_models()
+    peak_model_scores: dict[str, float] = {}
+    peak_test_probabilities: dict[str, np.ndarray] = {}
+    fitted_peak_models: dict[str, Any] = {}
+
+    for model_name, model in peak_models.items():
+        try:
+            model.fit(X_peak_train, y_peak_train)
+            y_hat = model.predict(X_peak_test)
+            score = float(accuracy_score(y_peak_test, y_hat))
+            peak_model_scores[model_name] = score
+            peak_test_probabilities[model_name] = model.predict_proba(X_peak_test)
+            fitted_peak_models[model_name] = model
+        except Exception:
+            # Skip models that fail due to insufficient unique classes
+            peak_model_scores[model_name] = 0.0
+            peak_test_probabilities[model_name] = np.ones(
+                (len(X_peak_test), 24), dtype=float
+            ) / 24.0
+            fitted_peak_models[model_name] = None
+
+    score_sum = float(sum(max(v, 1e-8) for v in peak_model_scores.values()))
+    peak_ensemble_weights = {
+        k: float(max(v, 1e-8) / score_sum) for k, v in peak_model_scores.items()
+    }
+
+    peak_pred_test = _weighted_majority_vote(
+        peak_test_probabilities,
+        peak_ensemble_weights,
     )
-    peak_model.fit(X_peak_train, y_peak_train)
-    peak_pred_test = peak_model.predict(X_peak_test)
     peak_accuracy = float(accuracy_score(y_peak_test, peak_pred_test))
 
     daily_peak_comparison_df = pd.DataFrame(
@@ -334,8 +451,16 @@ def train_and_evaluate(
     ).set_index("date")
 
     latest_daily_features = X_peak.iloc[-1]
+    latest_df = latest_daily_features.to_frame().T
+    latest_probs = {}
+    for name, model in fitted_peak_models.items():
+        if model is not None:
+            latest_probs[name] = model.predict_proba(latest_df)
+        else:
+            latest_probs[name] = np.ones((1, 24), dtype=float) / 24.0
+    
     predicted_peak_hour_next_day = int(
-        peak_model.predict(latest_daily_features.to_frame().T)[0]
+        _weighted_majority_vote(latest_probs, peak_ensemble_weights)[0]
     )
 
     return {
@@ -351,7 +476,8 @@ def train_and_evaluate(
         "latest_features": X.iloc[-1],
         "latest_timestamp": str(model_df.index[-1]),
         "target_col": target_col,
-        "daily_peak_model": peak_model,
+        "daily_peak_model": fitted_peak_models,
+        "daily_peak_ensemble_weights": peak_ensemble_weights,
         "daily_peak_feature_cols": peak_feature_cols,
         "latest_daily_features": latest_daily_features,
         "daily_peak_accuracy": peak_accuracy,
