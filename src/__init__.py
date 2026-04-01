@@ -6,6 +6,7 @@ from .pipeline import (
     build_model_frame,
     train_and_evaluate,
     predict_next_hour,
+    predict_next_6_hours,
     save_artifacts,
     load_artifacts,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "build_model_frame",
     "train_and_evaluate",
     "predict_next_hour",
+    "predict_next_6_hours",
     "save_artifacts",
     "load_artifacts",
 ]
