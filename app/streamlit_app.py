@@ -14,7 +14,7 @@ try:
         load_artifacts,
         predict_next_6_hours,
     )
-    from src.train import run_training
+    from src.train import run_training_with_options
 except ModuleNotFoundError:
     ROOT_DIR = Path(__file__).resolve().parents[1]
     if str(ROOT_DIR) not in sys.path:
@@ -25,7 +25,7 @@ except ModuleNotFoundError:
         load_artifacts,
         predict_next_6_hours,
     )
-    from src.train import run_training
+    from src.train import run_training_with_options
 
 st.set_page_config(page_title="Smart Power Usage Forecast", layout="wide")
 st.title("Smart Power Usage Forecasting Dashboard")
@@ -36,6 +36,19 @@ st.caption(
 
 with st.sidebar:
     st.header("Configuration")
+    model_profile = st.selectbox(
+        "Model profile",
+        options=["fast", "balanced", "full"],
+        index=0,
+        help="fast = quicker iteration, full = heavier training",
+    )
+    max_rows = st.number_input(
+        "Max raw rows (0 = all)",
+        min_value=0,
+        value=180000,
+        step=10000,
+        help="Use recent rows only for faster retraining",
+    )
 
     run_training_clicked = st.button("Train / Retrain", type="primary")
 
@@ -43,7 +56,10 @@ with st.sidebar:
 def load_or_train(force_retrain: bool = False):
     if force_retrain or not ARTIFACT_PATH.exists():
         with st.spinner("Training models..."):
-            artifact = run_training()
+            artifact = run_training_with_options(
+                model_profile=model_profile,
+                max_rows=(None if int(max_rows) == 0 else int(max_rows)),
+            )
             st.success(f"✅ Model trained and saved to: {ARTIFACT_PATH}")
             return artifact
     else:
@@ -76,7 +92,9 @@ col3.metric(
 )
 
 col4, col5 = st.columns(2)
-col4.metric("Predicted Next-Day Peak Hour", f"{next_6h['predicted_peak_hour_next_day']:02d}:00")
+col4.metric(
+    "Predicted Next-Day Peak Hour", f"{next_6h['predicted_peak_hour_next_day']:02d}:00"
+)
 col5.metric("Daily Peak-Hour Model Accuracy", f"{artifact['daily_peak_accuracy']:.3f}")
 
 st.subheader("Model Comparison")
@@ -117,7 +135,9 @@ st.write(
     pd.DataFrame(
         {
             "latest_timestamp": [next_6h["timestamp_of_latest_input"]],
-            "predicted_next_6h_avg_power_kw": [next_6h["predicted_next_6h_avg_power_kw"]],
+            "predicted_next_6h_avg_power_kw": [
+                next_6h["predicted_next_6h_avg_power_kw"]
+            ],
             "predicted_peak_hour_next_day": [next_6h["predicted_peak_hour_next_day"]],
             "backup_power_time_window": [next_6h["backup_power_time_window"]],
             "predicted_peak": [peak_text],
@@ -220,9 +240,8 @@ with inference_tab2:
         if artifact["best_model_name"] == "Weighted Ensemble":
             prediction = 0.0
             for model_name, model in artifact["ensemble_models"].items():
-                prediction += (
-                    artifact["ensemble_weights"][model_name]
-                    * float(model.predict(custom_features_df)[0])
+                prediction += artifact["ensemble_weights"][model_name] * float(
+                    model.predict(custom_features_df)[0]
                 )
         else:
             prediction = float(best_model.predict(custom_features_df)[0])

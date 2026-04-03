@@ -11,7 +11,7 @@ This project upgrades your notebook prototype into a complete ML workflow with:
 
 ## Project Structure
 
-- `src/power_forecast/`: reusable ML pipeline and training logic
+- `src/`: reusable ML pipeline and training logic
 - `app/streamlit_app.py`: interactive dashboard
 - `app/api.py`: API endpoints for train/forecast/metrics
 - `models/`: saved trained artifact (`.joblib`)
@@ -63,10 +63,21 @@ The API will usually be available at `http://127.0.0.1:8000`, and the interactiv
 
 ## API Endpoints
 - `GET /health`
-- `POST /train?data_path=...`
+- `POST /train?data_path=...&model_profile=fast|max_rows=180000`
 - `GET /forecast/next`
 - `GET /forecast/next6h`
 - `GET /metrics`
+
+## Faster local iteration (recommended during development)
+
+- Use the local CSV in `data/household_power_consumption.csv` (default behavior when available).
+- Use `model_profile=fast` and a `max_rows` cap while experimenting.
+- Run full profile only for final model refresh/deployment checks.
+
+Example (optional):
+
+- `python measure_metrics.py --profile fast --max-rows 180000`
+- `python measure_metrics.py --profile full --max-rows 0`
 
 ## Notes
 

@@ -8,7 +8,7 @@ from src.pipeline import (
 )
 
 
-def _make_synthetic_raw_data(days: int = 90) -> pd.DataFrame:
+def _make_synthetic_raw_data(days: int = 45) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     idx = pd.date_range("2024-01-01", periods=days * 24 * 60, freq="min")
 
@@ -45,7 +45,7 @@ def test_pipeline_builds_features_and_metrics():
     assert "target_next_6h_avg" in model_df.columns
     assert "power_lag_24" in model_df.columns
 
-    trained = train_and_evaluate(model_df, hourly)
+    trained = train_and_evaluate(model_df, hourly, model_profile="fast")
     assert "results_df" in trained
     assert len(trained["results_df"]) >= 4
     assert "RAE" in trained["results_df"].columns

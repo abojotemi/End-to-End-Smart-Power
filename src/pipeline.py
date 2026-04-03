@@ -8,8 +8,10 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import (
     ExtraTreesClassifier,
+    ExtraTreesRegressor,
     GradientBoostingClassifier,
     GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
     RandomForestClassifier,
 )
 from sklearn.linear_model import LinearRegression
@@ -175,30 +177,134 @@ def build_daily_peak_frame(df_hourly: pd.DataFrame) -> pd.DataFrame:
     return daily_stats.dropna()
 
 
-def _build_models() -> dict[str, Any]:
+def _build_models(model_profile: str = "balanced") -> dict[str, Any]:
+    profile = model_profile.lower().strip()
+
+    if profile == "fast":
+        return {
+            "Linear Regression": Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("model", LinearRegression()),
+                ]
+            ),
+            "MLP Compact": Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "model",
+                        MLPRegressor(
+                            hidden_layer_sizes=(32, 16),
+                            activation="relu",
+                            solver="adam",
+                            alpha=8e-5,
+                            learning_rate_init=8e-4,
+                            max_iter=120,
+                            early_stopping=True,
+                            random_state=RANDOM_STATE,
+                        ),
+                    ),
+                ]
+            ),
+            "Hist Gradient Boosting": HistGradientBoostingRegressor(
+                learning_rate=0.05,
+                max_iter=120,
+                max_depth=6,
+                random_state=RANDOM_STATE,
+            ),
+            "Extra Trees": ExtraTreesRegressor(
+                n_estimators=120,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            ),
+        }
+
+    if profile == "full":
+        return {
+            "Linear Regression": Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("model", LinearRegression()),
+                ]
+            ),
+            "MLP Wide": Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "model",
+                        MLPRegressor(
+                            hidden_layer_sizes=(192, 96),
+                            activation="relu",
+                            solver="adam",
+                            alpha=8e-5,
+                            learning_rate_init=9e-4,
+                            max_iter=900,
+                            early_stopping=True,
+                            random_state=RANDOM_STATE,
+                        ),
+                    ),
+                ]
+            ),
+            "MLP Compact": Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "model",
+                        MLPRegressor(
+                            hidden_layer_sizes=(64, 32),
+                            activation="relu",
+                            solver="adam",
+                            alpha=8e-5,
+                            learning_rate_init=8e-4,
+                            max_iter=800,
+                            early_stopping=True,
+                            random_state=RANDOM_STATE,
+                        ),
+                    ),
+                ]
+            ),
+            "MLP Deep": Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "model",
+                        MLPRegressor(
+                            hidden_layer_sizes=(128, 64, 32),
+                            activation="relu",
+                            solver="adam",
+                            alpha=1e-5,
+                            learning_rate_init=6e-4,
+                            max_iter=1000,
+                            early_stopping=True,
+                            random_state=RANDOM_STATE,
+                        ),
+                    ),
+                ]
+            ),
+            "Gradient Boosting": GradientBoostingRegressor(
+                n_estimators=420,
+                learning_rate=0.03,
+                max_depth=3,
+                random_state=RANDOM_STATE,
+            ),
+            "Hist Gradient Boosting": HistGradientBoostingRegressor(
+                learning_rate=0.04,
+                max_iter=320,
+                max_depth=10,
+                random_state=RANDOM_STATE,
+            ),
+            "Extra Trees": ExtraTreesRegressor(
+                n_estimators=350,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            ),
+        }
+
     return {
         "Linear Regression": Pipeline(
             [
                 ("scaler", StandardScaler()),
                 ("model", LinearRegression()),
-            ]
-        ),
-        "MLP Wide": Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                (
-                    "model",
-                    MLPRegressor(
-                        hidden_layer_sizes=(192, 96),
-                        activation="relu",
-                        solver="adam",
-                        alpha=8e-5,
-                        learning_rate_init=9e-4,
-                        max_iter=700,
-                        early_stopping=True,
-                        random_state=RANDOM_STATE,
-                    ),
-                ),
             ]
         ),
         "MLP Compact": Pipeline(
@@ -212,7 +318,7 @@ def _build_models() -> dict[str, Any]:
                         solver="adam",
                         alpha=8e-5,
                         learning_rate_init=8e-4,
-                        max_iter=700,
+                        max_iter=600,
                         early_stopping=True,
                         random_state=RANDOM_STATE,
                     ),
@@ -230,7 +336,7 @@ def _build_models() -> dict[str, Any]:
                         solver="adam",
                         alpha=1e-5,
                         learning_rate_init=6e-4,
-                        max_iter=900,
+                        max_iter=850,
                         early_stopping=True,
                         random_state=RANDOM_STATE,
                     ),
@@ -242,6 +348,17 @@ def _build_models() -> dict[str, Any]:
             learning_rate=0.03,
             max_depth=3,
             random_state=RANDOM_STATE,
+        ),
+        "Hist Gradient Boosting": HistGradientBoostingRegressor(
+            learning_rate=0.05,
+            max_iter=260,
+            max_depth=8,
+            random_state=RANDOM_STATE,
+        ),
+        "Extra Trees": ExtraTreesRegressor(
+            n_estimators=280,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
         ),
     }
 
@@ -281,7 +398,27 @@ def _predict_with_selected_model(
     return model.predict(features)
 
 
-def _build_peak_models() -> dict[str, Any]:
+def _build_peak_models(model_profile: str = "balanced") -> dict[str, Any]:
+    profile = model_profile.lower().strip()
+
+    if profile == "fast":
+        return {
+            "RandomForest": RandomForestClassifier(
+                n_estimators=100,
+                max_depth=None,
+                min_samples_leaf=1,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            ),
+            "ExtraTrees": ExtraTreesClassifier(
+                n_estimators=120,
+                max_depth=None,
+                min_samples_leaf=1,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            ),
+        }
+
     return {
         "RandomForest": RandomForestClassifier(
             n_estimators=450,
@@ -324,6 +461,7 @@ def train_and_evaluate(
     model_df: pd.DataFrame,
     df_hourly: pd.DataFrame,
     split_ratio: float = 0.8,
+    model_profile: str = "balanced",
 ) -> dict[str, Any]:
     target_col = "target_next_6h_avg"
     feature_cols = [c for c in model_df.columns if c != target_col]
@@ -340,7 +478,7 @@ def train_and_evaluate(
     X_fit, X_val = X_train.iloc[:val_split_idx], X_train.iloc[val_split_idx:]
     y_fit, y_val = y_train.iloc[:val_split_idx], y_train.iloc[val_split_idx:]
 
-    models = _build_models()
+    models = _build_models(model_profile=model_profile)
     results = []
     predictions: dict[str, np.ndarray] = {}
     fitted_models: dict[str, Any] = {}
@@ -410,7 +548,7 @@ def train_and_evaluate(
         y_peak.iloc[peak_split_idx:],
     )
 
-    peak_models = _build_peak_models()
+    peak_models = _build_peak_models(model_profile=model_profile)
     peak_model_scores: dict[str, float] = {}
     peak_test_probabilities: dict[str, np.ndarray] = {}
     fitted_peak_models: dict[str, Any] = {}

@@ -33,6 +33,33 @@ def run_training() -> dict:
     return trained
 
 
+def run_training_with_options(
+    data_path: str | None = None,
+    model_profile: str = "balanced",
+    max_rows: int | None = None,
+) -> dict:
+    raw_df = load_raw_data(data_path)
+    if max_rows is not None and max_rows > 0 and len(raw_df) > max_rows:
+        raw_df = raw_df.tail(max_rows).copy()
+
+    df_hourly = preprocess_hourly(raw_df)
+    model_df = build_model_frame(df_hourly)
+
+    trained = train_and_evaluate(
+        model_df,
+        df_hourly,
+        model_profile=model_profile,
+    )
+
+    METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    trained["results_df"].to_csv(METRICS_PATH, index=False)
+    trained["comparison_df"].to_csv(COMPARISON_PATH)
+    trained["peak_periods"].to_csv(PEAK_PERIODS_PATH)
+
+    save_artifacts(ARTIFACT_PATH, trained)
+    return trained
+
+
 if __name__ == "__main__":
     output = run_training()
     next_6h = predict_next_6_hours(output)
