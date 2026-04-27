@@ -12,9 +12,10 @@ from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
     HistGradientBoostingRegressor,
+    RandomForestRegressor,
     RandomForestClassifier,
 )
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import ElasticNet, LinearRegression, Ridge
 from sklearn.metrics import (
     accuracy_score,
     mean_absolute_error,
@@ -26,6 +27,30 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .config import DATA_DIR, RANDOM_STATE
+
+try:
+    from xgboost import XGBRegressor
+
+    HAS_XGBOOST = True
+except Exception:
+    XGBRegressor = None
+    HAS_XGBOOST = False
+
+
+def _make_xgb_regressor(**kwargs: Any) -> Any:
+    if XGBRegressor is None:
+        raise RuntimeError("XGBoost is not installed")
+    return XGBRegressor(**kwargs)
+
+
+def _scaled_pipeline(model: Any) -> Pipeline:
+    return Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("model", model),
+        ]
+    )
+
 
 NUMERIC_COLS = [
     "Global_active_power",
@@ -142,9 +167,25 @@ def build_model_frame(
             model_df["Global_intensity"].rolling(window).mean()
         )
 
+    model_df["power_diff_1"] = model_df["Global_active_power"].diff(1)
+    model_df["power_diff_24"] = model_df["Global_active_power"].diff(24)
+    model_df["voltage_diff_1"] = model_df["Voltage"].diff(1)
+    model_df["current_diff_1"] = model_df["Global_intensity"].diff(1)
+
+    model_df["power_pct_change_1"] = model_df["Global_active_power"].pct_change(1)
+    model_df["current_pct_change_1"] = model_df["Global_intensity"].pct_change(1)
+
+    model_df["voltage_x_current"] = (
+        model_df["Voltage"] * model_df["Global_intensity"]
+    )
+    model_df["power_to_current_ratio"] = model_df["Global_active_power"] / (
+        model_df["Global_intensity"] + 1e-6
+    )
+
     model_df["power_ewm_6"] = model_df["Global_active_power"].ewm(span=6).mean()
     model_df["power_ewm_24"] = model_df["Global_active_power"].ewm(span=24).mean()
 
+    model_df = model_df.replace([np.inf, -np.inf], np.nan)
     return model_df.dropna()
 
 
@@ -181,31 +222,11 @@ def _build_models(model_profile: str = "balanced") -> dict[str, Any]:
     profile = model_profile.lower().strip()
 
     if profile == "fast":
-        return {
-            "Linear Regression": Pipeline(
-                [
-                    ("scaler", StandardScaler()),
-                    ("model", LinearRegression()),
-                ]
+        models: dict[str, Any] = {
+            "Ridge": _scaled_pipeline(
+                Ridge(alpha=1.0, random_state=RANDOM_STATE)
             ),
-            "MLP Compact": Pipeline(
-                [
-                    ("scaler", StandardScaler()),
-                    (
-                        "model",
-                        MLPRegressor(
-                            hidden_layer_sizes=(32, 16),
-                            activation="relu",
-                            solver="adam",
-                            alpha=8e-5,
-                            learning_rate_init=8e-4,
-                            max_iter=120,
-                            early_stopping=True,
-                            random_state=RANDOM_STATE,
-                        ),
-                    ),
-                ]
-            ),
+            "Linear Regression": _scaled_pipeline(LinearRegression()),
             "Hist Gradient Boosting": HistGradientBoostingRegressor(
                 learning_rate=0.05,
                 max_iter=120,
@@ -213,154 +234,289 @@ def _build_models(model_profile: str = "balanced") -> dict[str, Any]:
                 random_state=RANDOM_STATE,
             ),
             "Extra Trees": ExtraTreesRegressor(
-                n_estimators=120,
+                n_estimators=200,
+                max_features=0.8,
+                min_samples_leaf=1,
+                bootstrap=False,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            ),
+            "Random Forest": RandomForestRegressor(
+                n_estimators=160,
+                max_features="sqrt",
+                min_samples_leaf=1,
                 random_state=RANDOM_STATE,
                 n_jobs=-1,
             ),
         }
 
+        if HAS_XGBOOST:
+            models["XGBoost"] = _make_xgb_regressor(
+                n_estimators=180,
+                learning_rate=0.05,
+                max_depth=5,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                objective="reg:squarederror",
+                eval_metric="rmse",
+                tree_method="hist",
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            )
+
+        if HAS_XGBOOST:
+            models["XGBoost Strong"] = _make_xgb_regressor(
+                n_estimators=240,
+                learning_rate=0.035,
+                max_depth=6,
+                min_child_weight=2,
+                subsample=0.9,
+                colsample_bytree=0.85,
+                reg_alpha=0.1,
+                reg_lambda=1.2,
+                objective="reg:squarederror",
+                eval_metric="rmse",
+                tree_method="hist",
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            )
+
+        return models
+
     if profile == "full":
-        return {
-            "Linear Regression": Pipeline(
-                [
-                    ("scaler", StandardScaler()),
-                    ("model", LinearRegression()),
-                ]
+        models = {
+            "Ridge": _scaled_pipeline(Ridge(alpha=0.8, random_state=RANDOM_STATE)),
+            "ElasticNet": _scaled_pipeline(
+                ElasticNet(
+                    alpha=0.0015,
+                    l1_ratio=0.15,
+                    max_iter=6000,
+                    random_state=RANDOM_STATE,
+                )
             ),
-            "MLP Wide": Pipeline(
-                [
-                    ("scaler", StandardScaler()),
-                    (
-                        "model",
-                        MLPRegressor(
-                            hidden_layer_sizes=(192, 96),
-                            activation="relu",
-                            solver="adam",
-                            alpha=8e-5,
-                            learning_rate_init=9e-4,
-                            max_iter=900,
-                            early_stopping=True,
-                            random_state=RANDOM_STATE,
-                        ),
-                    ),
-                ]
+            "Linear Regression": _scaled_pipeline(LinearRegression()),
+            "MLP Wide": _scaled_pipeline(
+                MLPRegressor(
+                    hidden_layer_sizes=(192, 96),
+                    activation="relu",
+                    solver="adam",
+                    alpha=8e-5,
+                    learning_rate_init=8e-4,
+                    max_iter=1200,
+                    early_stopping=True,
+                    random_state=RANDOM_STATE,
+                )
             ),
-            "MLP Compact": Pipeline(
-                [
-                    ("scaler", StandardScaler()),
-                    (
-                        "model",
-                        MLPRegressor(
-                            hidden_layer_sizes=(64, 32),
-                            activation="relu",
-                            solver="adam",
-                            alpha=8e-5,
-                            learning_rate_init=8e-4,
-                            max_iter=800,
-                            early_stopping=True,
-                            random_state=RANDOM_STATE,
-                        ),
-                    ),
-                ]
+            "MLP Compact": _scaled_pipeline(
+                MLPRegressor(
+                    hidden_layer_sizes=(64, 32),
+                    activation="relu",
+                    solver="adam",
+                    alpha=8e-5,
+                    learning_rate_init=8e-4,
+                    max_iter=1000,
+                    early_stopping=True,
+                    random_state=RANDOM_STATE,
+                )
             ),
-            "MLP Deep": Pipeline(
-                [
-                    ("scaler", StandardScaler()),
-                    (
-                        "model",
-                        MLPRegressor(
-                            hidden_layer_sizes=(128, 64, 32),
-                            activation="relu",
-                            solver="adam",
-                            alpha=1e-5,
-                            learning_rate_init=6e-4,
-                            max_iter=1000,
-                            early_stopping=True,
-                            random_state=RANDOM_STATE,
-                        ),
-                    ),
-                ]
+            "MLP Deep": _scaled_pipeline(
+                MLPRegressor(
+                    hidden_layer_sizes=(128, 64, 32),
+                    activation="relu",
+                    solver="adam",
+                    alpha=1e-5,
+                    learning_rate_init=6e-4,
+                    max_iter=1200,
+                    early_stopping=True,
+                    random_state=RANDOM_STATE,
+                )
             ),
             "Gradient Boosting": GradientBoostingRegressor(
                 n_estimators=420,
-                learning_rate=0.03,
+                learning_rate=0.025,
                 max_depth=3,
+                min_samples_leaf=2,
                 random_state=RANDOM_STATE,
             ),
             "Hist Gradient Boosting": HistGradientBoostingRegressor(
-                learning_rate=0.04,
-                max_iter=320,
-                max_depth=10,
+                learning_rate=0.035,
+                max_iter=400,
+                max_depth=12,
+                min_samples_leaf=20,
+                l2_regularization=0.1,
                 random_state=RANDOM_STATE,
             ),
             "Extra Trees": ExtraTreesRegressor(
+                n_estimators=700,
+                max_features=0.8,
+                min_samples_leaf=1,
+                bootstrap=False,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            ),
+            "Extra Trees Smoothed": ExtraTreesRegressor(
                 n_estimators=350,
+                max_features=1.0,
+                min_samples_leaf=1,
+                bootstrap=False,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            ),
+            "Random Forest": RandomForestRegressor(
+                n_estimators=500,
+                max_features="sqrt",
+                min_samples_leaf=2,
                 random_state=RANDOM_STATE,
                 n_jobs=-1,
             ),
         }
 
-    return {
-        "Linear Regression": Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                ("model", LinearRegression()),
-            ]
+        if HAS_XGBOOST:
+            models["XGBoost"] = _make_xgb_regressor(
+                n_estimators=500,
+                learning_rate=0.025,
+                max_depth=6,
+                min_child_weight=2,
+                subsample=0.92,
+                colsample_bytree=0.9,
+                reg_alpha=0.0,
+                reg_lambda=1.0,
+                objective="reg:squarederror",
+                eval_metric="rmse",
+                tree_method="hist",
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            )
+
+        if HAS_XGBOOST:
+            models["XGBoost Strong"] = _make_xgb_regressor(
+                n_estimators=650,
+                learning_rate=0.02,
+                max_depth=7,
+                min_child_weight=3,
+                subsample=0.9,
+                colsample_bytree=0.85,
+                reg_alpha=0.1,
+                reg_lambda=1.5,
+                objective="reg:squarederror",
+                eval_metric="rmse",
+                tree_method="hist",
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+            )
+
+        return models
+
+    models = {
+        "Ridge": _scaled_pipeline(Ridge(alpha=1.0, random_state=RANDOM_STATE)),
+        "ElasticNet": _scaled_pipeline(
+            ElasticNet(
+                alpha=0.002,
+                l1_ratio=0.2,
+                max_iter=6000,
+                random_state=RANDOM_STATE,
+            )
         ),
-        "MLP Compact": Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                (
-                    "model",
-                    MLPRegressor(
-                        hidden_layer_sizes=(64, 32),
-                        activation="relu",
-                        solver="adam",
-                        alpha=8e-5,
-                        learning_rate_init=8e-4,
-                        max_iter=600,
-                        early_stopping=True,
-                        random_state=RANDOM_STATE,
-                    ),
-                ),
-            ]
+        "Linear Regression": _scaled_pipeline(LinearRegression()),
+        "MLP Compact": _scaled_pipeline(
+            MLPRegressor(
+                hidden_layer_sizes=(64, 32),
+                activation="relu",
+                solver="adam",
+                alpha=8e-5,
+                learning_rate_init=8e-4,
+                max_iter=900,
+                early_stopping=True,
+                random_state=RANDOM_STATE,
+            )
         ),
-        "MLP Deep": Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                (
-                    "model",
-                    MLPRegressor(
-                        hidden_layer_sizes=(128, 64, 32),
-                        activation="relu",
-                        solver="adam",
-                        alpha=1e-5,
-                        learning_rate_init=6e-4,
-                        max_iter=850,
-                        early_stopping=True,
-                        random_state=RANDOM_STATE,
-                    ),
-                ),
-            ]
+        "MLP Deep": _scaled_pipeline(
+            MLPRegressor(
+                hidden_layer_sizes=(128, 64, 32),
+                activation="relu",
+                solver="adam",
+                alpha=1e-5,
+                learning_rate_init=6e-4,
+                max_iter=1000,
+                early_stopping=True,
+                random_state=RANDOM_STATE,
+            )
         ),
         "Gradient Boosting": GradientBoostingRegressor(
-            n_estimators=350,
-            learning_rate=0.03,
+            n_estimators=380,
+            learning_rate=0.025,
             max_depth=3,
+            min_samples_leaf=2,
             random_state=RANDOM_STATE,
         ),
         "Hist Gradient Boosting": HistGradientBoostingRegressor(
-            learning_rate=0.05,
-            max_iter=260,
-            max_depth=8,
+            learning_rate=0.04,
+            max_iter=320,
+            max_depth=10,
+            min_samples_leaf=20,
+            l2_regularization=0.1,
             random_state=RANDOM_STATE,
         ),
         "Extra Trees": ExtraTreesRegressor(
-            n_estimators=280,
+            n_estimators=500,
+            max_features=0.8,
+            min_samples_leaf=1,
+            bootstrap=False,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        ),
+        "Extra Trees Smoothed": ExtraTreesRegressor(
+            n_estimators=350,
+            max_features=1.0,
+            min_samples_leaf=1,
+            bootstrap=False,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        ),
+        "Random Forest": RandomForestRegressor(
+            n_estimators=420,
+            max_features="sqrt",
+            min_samples_leaf=2,
             random_state=RANDOM_STATE,
             n_jobs=-1,
         ),
     }
+
+    if HAS_XGBOOST:
+        models["XGBoost"] = _make_xgb_regressor(
+            n_estimators=420,
+            learning_rate=0.03,
+            max_depth=6,
+            min_child_weight=2,
+            subsample=0.92,
+            colsample_bytree=0.88,
+            reg_alpha=0.05,
+            reg_lambda=1.2,
+            objective="reg:squarederror",
+            eval_metric="rmse",
+            tree_method="hist",
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        )
+
+    if HAS_XGBOOST:
+        models["XGBoost Strong"] = _make_xgb_regressor(
+            n_estimators=560,
+            learning_rate=0.02,
+            max_depth=7,
+            min_child_weight=3,
+            subsample=0.9,
+            colsample_bytree=0.85,
+            reg_alpha=0.1,
+            reg_lambda=1.5,
+            objective="reg:squarederror",
+            eval_metric="rmse",
+            tree_method="hist",
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        )
+
+    return models
 
 
 def _relative_absolute_error(y_true: pd.Series, y_pred: np.ndarray) -> float:
@@ -445,16 +601,26 @@ def _build_peak_models(model_profile: str = "balanced") -> dict[str, Any]:
 
 def _weighted_majority_vote(
     model_probs: dict[str, np.ndarray],
+    model_classes: dict[str, np.ndarray],
     weights: dict[str, float],
 ) -> np.ndarray:
-    combined = None
-    for name, probs in model_probs.items():
-        weighted_probs = weights[name] * probs
-        combined = weighted_probs if combined is None else combined + weighted_probs
-
-    if combined is None:
+    if not model_probs:
         return np.array([], dtype=int)
-    return np.argmax(combined, axis=1)
+
+    classes_union = np.unique(
+        np.concatenate([np.asarray(cls, dtype=int) for cls in model_classes.values()])
+    )
+    class_to_idx = {int(c): i for i, c in enumerate(classes_union)}
+    combined = np.zeros((len(next(iter(model_probs.values()))), len(classes_union)))
+
+    for name, probs in model_probs.items():
+        classes = np.asarray(model_classes[name], dtype=int)
+        for local_idx, klass in enumerate(classes):
+            combined[:, class_to_idx[int(klass)]] += (
+                weights[name] * probs[:, local_idx]
+            )
+
+    return classes_union[np.argmax(combined, axis=1)]
 
 
 def train_and_evaluate(
@@ -483,11 +649,13 @@ def train_and_evaluate(
     predictions: dict[str, np.ndarray] = {}
     fitted_models: dict[str, Any] = {}
     validation_rmse: dict[str, float] = {}
+    validation_predictions: dict[str, np.ndarray] = {}
 
     for name, model in models.items():
         model.fit(X_fit, y_fit)
         val_pred = model.predict(X_val)
         validation_rmse[name] = float(np.sqrt(mean_squared_error(y_val, val_pred)))
+        validation_predictions[name] = np.asarray(val_pred, dtype=float)
 
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
@@ -498,14 +666,31 @@ def train_and_evaluate(
         fitted_models[name] = model
 
     inv_errors = {name: 1.0 / max(err, 1e-8) for name, err in validation_rmse.items()}
-    inv_total = float(sum(inv_errors.values()))
-    ensemble_weights = {
-        name: float(score / inv_total) for name, score in inv_errors.items()
-    }
+    top_model_names = [
+        name for name, _ in sorted(validation_rmse.items(), key=lambda kv: kv[1])[:4]
+    ]
+    X_val_stack = np.column_stack([validation_predictions[name] for name in top_model_names])
+    stacker = LinearRegression(fit_intercept=False, positive=True)
+    stacker.fit(X_val_stack, y_val)
+    learned_weights = np.asarray(stacker.coef_, dtype=float)
+
+    if learned_weights.sum() <= 1e-12:
+        top_fallback_total = float(sum(inv_errors[name] for name in top_model_names))
+        top_weights = {
+            name: float(inv_errors[name] / top_fallback_total) for name in top_model_names
+        }
+    else:
+        learned_weights = learned_weights / learned_weights.sum()
+        top_weights = {
+            name: float(weight) for name, weight in zip(top_model_names, learned_weights)
+        }
+
+    ensemble_weights = {name: 0.0 for name in models}
+    ensemble_weights.update(top_weights)
 
     ensemble_pred = np.zeros(len(y_test), dtype=float)
-    for name, y_pred in predictions.items():
-        ensemble_pred += ensemble_weights[name] * y_pred
+    for name in top_model_names:
+        ensemble_pred += ensemble_weights[name] * predictions[name]
 
     ensemble_metrics = _evaluate_regression(y_test, ensemble_pred)
     results.append({"Model": ENSEMBLE_MODEL_NAME, **ensemble_metrics})
@@ -551,6 +736,7 @@ def train_and_evaluate(
     peak_models = _build_peak_models(model_profile=model_profile)
     peak_model_scores: dict[str, float] = {}
     peak_test_probabilities: dict[str, np.ndarray] = {}
+    peak_test_classes: dict[str, np.ndarray] = {}
     fitted_peak_models: dict[str, Any] = {}
 
     for model_name, model in peak_models.items():
@@ -560,13 +746,15 @@ def train_and_evaluate(
             score = float(accuracy_score(y_peak_test, y_hat))
             peak_model_scores[model_name] = score
             peak_test_probabilities[model_name] = model.predict_proba(X_peak_test)
+            peak_test_classes[model_name] = np.asarray(model.classes_, dtype=int)
             fitted_peak_models[model_name] = model
         except Exception:
             # Skip models that fail due to insufficient unique classes
             peak_model_scores[model_name] = 0.0
-            peak_test_probabilities[model_name] = np.ones(
-                (len(X_peak_test), 24), dtype=float
-            ) / 24.0
+            peak_test_probabilities[model_name] = (
+                np.ones((len(X_peak_test), 24), dtype=float) / 24.0
+            )
+            peak_test_classes[model_name] = np.arange(24, dtype=int)
             fitted_peak_models[model_name] = None
 
     score_sum = float(sum(max(v, 1e-8) for v in peak_model_scores.values()))
@@ -576,6 +764,7 @@ def train_and_evaluate(
 
     peak_pred_test = _weighted_majority_vote(
         peak_test_probabilities,
+        peak_test_classes,
         peak_ensemble_weights,
     )
     peak_accuracy = float(accuracy_score(y_peak_test, peak_pred_test))
@@ -591,14 +780,17 @@ def train_and_evaluate(
     latest_daily_features = X_peak.iloc[-1]
     latest_df = latest_daily_features.to_frame().T
     latest_probs = {}
+    latest_classes = {}
     for name, model in fitted_peak_models.items():
         if model is not None:
             latest_probs[name] = model.predict_proba(latest_df)
+            latest_classes[name] = np.asarray(model.classes_, dtype=int)
         else:
             latest_probs[name] = np.ones((1, 24), dtype=float) / 24.0
-    
+            latest_classes[name] = np.arange(24, dtype=int)
+
     predicted_peak_hour_next_day = int(
-        _weighted_majority_vote(latest_probs, peak_ensemble_weights)[0]
+        _weighted_majority_vote(latest_probs, latest_classes, peak_ensemble_weights)[0]
     )
 
     return {

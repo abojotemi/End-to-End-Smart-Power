@@ -20,7 +20,8 @@ dependencies = [
     "plotly>=5.22.0",
     "httpx>=0.27.0",
     "ucimlrepo>=0.0.7",
-    "ipykernel>=7.2.0"
+    "ipykernel>=7.2.0",
+    "xgboost>=2.1.0"
 ]
 
 [tool.setuptools]

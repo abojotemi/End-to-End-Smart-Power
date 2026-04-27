@@ -3,7 +3,7 @@
 This project upgrades your notebook prototype into a complete ML workflow with:
 
 - **Data preprocessing + feature engineering**
-- **Model training and comparison** (Deep MLP models + weighted ensemble + baselines)
+- **Model training and comparison** (Deep MLP + XGBoost + weighted ensemble + baselines)
 - **Saved artifacts** for reuse
 - **Streamlit dashboard** for interactive analytics
 - **FastAPI service** for programmatic forecasts
