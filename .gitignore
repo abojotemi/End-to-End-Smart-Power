@@ -6,5 +6,6 @@ venv/
 .pytest_cache/
 .ipynb_checkpoints/
 models/*.joblib
+!models/power_forecast.joblib
 reports/*.csv
 *.csv

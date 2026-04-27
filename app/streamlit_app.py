@@ -68,11 +68,23 @@ def load_or_train(force_retrain: bool = False):
 
 
 artifact = None
-try:
-    artifact = load_or_train(force_retrain=run_training_clicked)
-
-except Exception as exc:
-    st.error(f"Failed to load/train pipeline: {exc}")
+if ARTIFACT_PATH.exists() and not run_training_clicked:
+    try:
+        artifact = load_or_train(force_retrain=False)
+    except Exception as exc:
+        st.error(f"Failed to load/train pipeline: {exc}")
+        st.stop()
+elif run_training_clicked:
+    try:
+        artifact = load_or_train(force_retrain=True)
+    except Exception as exc:
+        st.error(f"Failed to load/train pipeline: {exc}")
+        st.stop()
+else:
+    st.warning(
+        "No saved model artifact was found in this deployment. "
+        "Click 'Train / Retrain' to build one on demand."
+    )
     st.stop()
 
 if artifact is None:
