@@ -113,18 +113,6 @@ summary_cols[3].metric("MAPE", f"{float(best_metrics.get('MAPE', 0.0)):.2f}%")
 st.subheader("Model Comparison")
 st.dataframe(results_df, width="stretch")
 
-with st.expander("Saved model files", expanded=False):
-    if not model_paths:
-        st.info("No exported model files were found in the current artifact.")
-    else:
-        st.dataframe(
-            pd.DataFrame(
-                {"Model": list(model_paths.keys()), "Path": list(model_paths.values())}
-            ),
-            width="stretch",
-        )
-
-
 
 st.subheader("Actual vs Predicted (Test Window)")
 line_fig = px.line(
