@@ -27,6 +27,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .config import DATA_DIR, RANDOM_STATE
+from .config import MODEL_EXPORT_DIR
 
 try:
     from xgboost import XGBRegressor
@@ -175,9 +176,7 @@ def build_model_frame(
     model_df["power_pct_change_1"] = model_df["Global_active_power"].pct_change(1)
     model_df["current_pct_change_1"] = model_df["Global_intensity"].pct_change(1)
 
-    model_df["voltage_x_current"] = (
-        model_df["Voltage"] * model_df["Global_intensity"]
-    )
+    model_df["voltage_x_current"] = model_df["Voltage"] * model_df["Global_intensity"]
     model_df["power_to_current_ratio"] = model_df["Global_active_power"] / (
         model_df["Global_intensity"] + 1e-6
     )
@@ -223,9 +222,7 @@ def _build_models(model_profile: str = "balanced") -> dict[str, Any]:
 
     if profile == "fast":
         models: dict[str, Any] = {
-            "Ridge": _scaled_pipeline(
-                Ridge(alpha=1.0, random_state=RANDOM_STATE)
-            ),
+            "Ridge": _scaled_pipeline(Ridge(alpha=1.0, random_state=RANDOM_STATE)),
             "Linear Regression": _scaled_pipeline(LinearRegression()),
             "Hist Gradient Boosting": HistGradientBoostingRegressor(
                 learning_rate=0.05,
@@ -616,11 +613,78 @@ def _weighted_majority_vote(
     for name, probs in model_probs.items():
         classes = np.asarray(model_classes[name], dtype=int)
         for local_idx, klass in enumerate(classes):
-            combined[:, class_to_idx[int(klass)]] += (
-                weights[name] * probs[:, local_idx]
-            )
+            combined[:, class_to_idx[int(klass)]] += weights[name] * probs[:, local_idx]
 
     return classes_union[np.argmax(combined, axis=1)]
+
+
+def _sanitize_model_name(name: str) -> str:
+    return "".join(ch.lower() if ch.isalnum() else "_" for ch in name).strip("_")
+
+
+def _export_model_files(
+    fitted_models: dict[str, Any],
+    best_model_name: str,
+    best_model: Any,
+    ensemble_weights: dict[str, float],
+    peak_models: dict[str, Any],
+    peak_ensemble_weights: dict[str, float],
+) -> dict[str, str]:
+    export_dir = Path(MODEL_EXPORT_DIR)
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    model_paths: dict[str, str] = {}
+
+    for name, model in fitted_models.items():
+        path = export_dir / f"{_sanitize_model_name(name)}.joblib"
+        joblib.dump(model, path)
+        model_paths[name] = str(path)
+
+    for name, model in peak_models.items():
+        if model is None:
+            continue
+        path = export_dir / f"daily_peak_{_sanitize_model_name(name)}.joblib"
+        joblib.dump(model, path)
+        model_paths[f"daily_peak::{name}"] = str(path)
+
+    ensemble_path = export_dir / "weighted_ensemble.joblib"
+    joblib.dump(
+        {
+            "best_model_name": ENSEMBLE_MODEL_NAME,
+            "models": fitted_models,
+            "weights": ensemble_weights,
+        },
+        ensemble_path,
+    )
+    model_paths[ENSEMBLE_MODEL_NAME] = str(ensemble_path)
+
+    best_path = export_dir / f"best_{_sanitize_model_name(best_model_name)}.joblib"
+    if best_model is not None:
+        joblib.dump(best_model, best_path)
+    else:
+        joblib.dump(
+            {
+                "best_model_name": best_model_name,
+                "best_model_bundle": {
+                    "models": fitted_models,
+                    "weights": ensemble_weights,
+                },
+            },
+            best_path,
+        )
+    model_paths["best_model"] = str(best_path)
+
+    peak_bundle_path = export_dir / "daily_peak_ensemble.joblib"
+    joblib.dump(
+        {
+            "models": peak_models,
+            "weights": peak_ensemble_weights,
+        },
+        peak_bundle_path,
+    )
+    model_paths["daily_peak_ensemble"] = str(peak_bundle_path)
+
+    return model_paths
 
 
 def train_and_evaluate(
@@ -669,7 +733,9 @@ def train_and_evaluate(
     top_model_names = [
         name for name, _ in sorted(validation_rmse.items(), key=lambda kv: kv[1])[:4]
     ]
-    X_val_stack = np.column_stack([validation_predictions[name] for name in top_model_names])
+    X_val_stack = np.column_stack(
+        [validation_predictions[name] for name in top_model_names]
+    )
     stacker = LinearRegression(fit_intercept=False, positive=True)
     stacker.fit(X_val_stack, y_val)
     learned_weights = np.asarray(stacker.coef_, dtype=float)
@@ -677,12 +743,14 @@ def train_and_evaluate(
     if learned_weights.sum() <= 1e-12:
         top_fallback_total = float(sum(inv_errors[name] for name in top_model_names))
         top_weights = {
-            name: float(inv_errors[name] / top_fallback_total) for name in top_model_names
+            name: float(inv_errors[name] / top_fallback_total)
+            for name in top_model_names
         }
     else:
         learned_weights = learned_weights / learned_weights.sum()
         top_weights = {
-            name: float(weight) for name, weight in zip(top_model_names, learned_weights)
+            name: float(weight)
+            for name, weight in zip(top_model_names, learned_weights)
         }
 
     ensemble_weights = {name: 0.0 for name in models}
@@ -793,6 +861,17 @@ def train_and_evaluate(
         _weighted_majority_vote(latest_probs, latest_classes, peak_ensemble_weights)[0]
     )
 
+    model_paths = _export_model_files(
+        fitted_models=fitted_models,
+        best_model_name=best_model_name,
+        best_model=best_model,
+        ensemble_weights=ensemble_weights,
+        peak_models=fitted_peak_models,
+        peak_ensemble_weights=peak_ensemble_weights,
+    )
+
+    best_row = results_df.iloc[0].to_dict()
+
     return {
         "results_df": results_df,
         "comparison_df": comparison_df,
@@ -813,6 +892,8 @@ def train_and_evaluate(
         "daily_peak_accuracy": peak_accuracy,
         "daily_peak_comparison_df": daily_peak_comparison_df,
         "predicted_peak_hour_next_day": predicted_peak_hour_next_day,
+        "model_paths": model_paths,
+        "best_metrics": best_row,
     }
 
 

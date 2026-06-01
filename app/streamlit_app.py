@@ -12,7 +12,6 @@ try:
     from src.config import ARTIFACT_PATH
     from src.pipeline import (
         load_artifacts,
-        predict_next_6_hours,
     )
     from src.train import run_training_with_options
 except ModuleNotFoundError:
@@ -23,7 +22,6 @@ except ModuleNotFoundError:
     from src.config import ARTIFACT_PATH
     from src.pipeline import (
         load_artifacts,
-        predict_next_6_hours,
     )
     from src.train import run_training_with_options
 
@@ -94,23 +92,39 @@ if artifact is None:
 results_df = artifact["results_df"].copy()
 comparison_df = artifact["comparison_df"].copy().reset_index()
 peak_periods_df = artifact["peak_periods"].copy().reset_index()
-next_6h = predict_next_6_hours(artifact)
+best_metrics = artifact.get("best_metrics", results_df.iloc[0].to_dict())
+model_paths = artifact.get("model_paths", {})
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 col1.metric("Best Model", artifact["best_model_name"])
 col2.metric("Peak Threshold (kW)", f"{artifact['peak_threshold']:.3f}")
-col3.metric(
-    "Next-6H Avg Forecast (kW)", f"{next_6h['predicted_next_6h_avg_power_kw']:.3f}"
-)
 
 col4, col5 = st.columns(2)
-col4.metric(
-    "Predicted Next-Day Peak Hour", f"{next_6h['predicted_peak_hour_next_day']:02d}:00"
-)
-col5.metric("Daily Peak-Hour Model Accuracy", f"{artifact['daily_peak_accuracy']:.3f}")
+col4.metric("Predicted Next-Day Peak Hour", f"{int(artifact.get('predicted_peak_hour_next_day', 0)):02d}:00")
+col5.metric("Daily Peak-Hour Model Accuracy", f"{artifact.get('daily_peak_accuracy', 0.0):.3f}")
+
+st.subheader("Best Model Summary")
+summary_cols = st.columns(4)
+summary_cols[0].metric("R²", f"{float(best_metrics.get('R2', 0.0)):.4f}")
+summary_cols[1].metric("RMSE", f"{float(best_metrics.get('RMSE', 0.0)):.4f}")
+summary_cols[2].metric("MAE", f"{float(best_metrics.get('MAE', 0.0)):.4f}")
+summary_cols[3].metric("MAPE", f"{float(best_metrics.get('MAPE', 0.0)):.2f}%")
 
 st.subheader("Model Comparison")
 st.dataframe(results_df, width="stretch")
+
+with st.expander("Saved model files", expanded=False):
+    if not model_paths:
+        st.info("No exported model files were found in the current artifact.")
+    else:
+        st.dataframe(
+            pd.DataFrame(
+                {"Model": list(model_paths.keys()), "Path": list(model_paths.values())}
+            ),
+            width="stretch",
+        )
+
+
 
 st.subheader("Actual vs Predicted (Test Window)")
 line_fig = px.line(
@@ -142,16 +156,13 @@ else:
     st.plotly_chart(scatter, width="stretch")
 
 st.subheader("Operational Insight")
-peak_text = "Yes" if next_6h["is_predicted_peak_period"] else "No"
+peak_text = "Yes" if artifact.get("predicted_peak", False) else "No"
 st.write(
     pd.DataFrame(
         {
-            "latest_timestamp": [next_6h["timestamp_of_latest_input"]],
-            "predicted_next_6h_avg_power_kw": [
-                next_6h["predicted_next_6h_avg_power_kw"]
-            ],
-            "predicted_peak_hour_next_day": [next_6h["predicted_peak_hour_next_day"]],
-            "backup_power_time_window": [next_6h["backup_power_time_window"]],
+            "latest_timestamp": [artifact.get("latest_timestamp", "--")],
+            "predicted_peak_hour_next_day": [artifact.get("predicted_peak_hour_next_day", "--")],
+            "backup_power_time_window": [artifact.get("backup_power_time_window", "--")],
             "predicted_peak": [peak_text],
         }
     )
@@ -191,8 +202,8 @@ with inference_tab1:
             is_peak = actual_value >= artifact["peak_threshold"]
 
             col1, col2, col3 = st.columns(3)
-            col1.metric("Actual Next-6H Avg (kW)", f"{actual_value:.3f}")
-            col2.metric("Predicted Next-6H Avg (kW)", f"{predicted_value:.3f}")
+            col1.metric("Actual (kW)", f"{actual_value:.3f}")
+            col2.metric("Predicted (kW)", f"{predicted_value:.3f}")
             col3.metric("Error (kW)", f"{abs(actual_value - predicted_value):.3f}")
 
             st.metric("Peak Period?", "Yes 🔴" if is_peak else "No 🟢")
@@ -262,7 +273,7 @@ with inference_tab2:
         st.success("✅ Prediction Generated!")
         col1, col2 = st.columns(2)
         col1.metric(
-            "Predicted Next-6H Avg Power (kW)",
+            "Predicted (kW)",
             f"{prediction:.3f}",
             delta=f"{prediction - global_active_power:.3f}",
         )
@@ -272,7 +283,7 @@ with inference_tab2:
         )
         st.info(
             f"📊 With current power at {global_active_power:.2f} kW, "
-            f"the model predicts the next 6-hour average will be {prediction:.2f} kW."
+            f"the model predicts the upcoming period average will be {prediction:.2f} kW."
         )
 
 st.download_button(

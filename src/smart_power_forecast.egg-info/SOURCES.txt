@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+src/smart_power_forecast.egg-info/PKG-INFO
+src/smart_power_forecast.egg-info/SOURCES.txt
+src/smart_power_forecast.egg-info/dependency_links.txt
+src/smart_power_forecast.egg-info/requires.txt
+src/smart_power_forecast.egg-info/top_level.txt
+tests/test_pipeline.py

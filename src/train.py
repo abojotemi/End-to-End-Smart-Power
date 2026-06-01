@@ -66,10 +66,15 @@ if __name__ == "__main__":
 
     print("Training complete.")
     print(f"Best model: {output['best_model_name']}")
+    print("Top metrics:")
+    print(output["results_df"].head(5).to_string(index=False))
     print("Saved:")
     print(f"- {ARTIFACT_PATH}")
     print(f"- {METRICS_PATH}")
     print(f"- {COMPARISON_PATH}")
     print(f"- {PEAK_PERIODS_PATH}")
+    if "model_paths" in output:
+        for name, path in output["model_paths"].items():
+            print(f"- {name}: {path}")
     print("Next-6-hour forecast and peak-hour recommendation:")
     print(next_6h)
