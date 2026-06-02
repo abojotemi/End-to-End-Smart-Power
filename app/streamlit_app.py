@@ -29,7 +29,7 @@ st.set_page_config(page_title="Smart Power Usage Forecast", layout="wide")
 st.title("Smart Power Usage Forecasting Dashboard")
 
 st.caption(
-    "Train deep + ensemble models, compare metrics, detect peak periods, and forecast next-6-hour demand."
+    "Train deep + ensemble models, compare metrics, detect peak periods, and inspect forecast summaries."
 )
 
 with st.sidebar:
@@ -54,6 +54,9 @@ with st.sidebar:
 def load_or_train(force_retrain: bool = False):
     if force_retrain or not ARTIFACT_PATH.exists():
         with st.spinner("Training models..."):
+            if force_retrain:
+                # Make sure we do not accidentally keep displaying a stale artifact.
+                ARTIFACT_PATH.unlink(missing_ok=True)
             artifact = run_training_with_options(
                 model_profile=model_profile,
                 max_rows=(None if int(max_rows) == 0 else int(max_rows)),
@@ -61,20 +64,31 @@ def load_or_train(force_retrain: bool = False):
             st.success(f"✅ Model trained and saved to: {ARTIFACT_PATH}")
             return artifact
     else:
-        st.info(f"📦 Loading cached model from: {ARTIFACT_PATH}")
+        st.info(f"📦 Loading saved model from: {ARTIFACT_PATH}")
         return load_artifacts(ARTIFACT_PATH)
 
 
+if "artifact" not in st.session_state:
+    st.session_state["artifact"] = None
+
+
 artifact = None
-if ARTIFACT_PATH.exists() and not run_training_clicked:
+if run_training_clicked:
     try:
-        artifact = load_or_train(force_retrain=False)
+        artifact = load_or_train(force_retrain=True)
+        st.session_state["artifact"] = artifact
     except Exception as exc:
         st.error(f"Failed to load/train pipeline: {exc}")
         st.stop()
-elif run_training_clicked:
+
+elif st.session_state["artifact"] is not None:
+    artifact = st.session_state["artifact"]
+    st.success("✅ Showing the latest trained model from this session.")
+
+elif ARTIFACT_PATH.exists():
     try:
-        artifact = load_or_train(force_retrain=True)
+        artifact = load_or_train(force_retrain=False)
+        st.session_state["artifact"] = artifact
     except Exception as exc:
         st.error(f"Failed to load/train pipeline: {exc}")
         st.stop()
@@ -93,14 +107,18 @@ results_df = artifact["results_df"].copy()
 comparison_df = artifact["comparison_df"].copy().reset_index()
 peak_periods_df = artifact["peak_periods"].copy().reset_index()
 best_metrics = artifact.get("best_metrics", results_df.iloc[0].to_dict())
-model_paths = artifact.get("model_paths", {})
 
 col1, col2 = st.columns(2)
 col1.metric("Best Model", artifact["best_model_name"])
 col2.metric("Peak Threshold (kW)", f"{artifact['peak_threshold']:.3f}")
 
 col4, col5 = st.columns(2)
-col4.metric("Predicted Next-Day Peak Hour", f"{int(artifact.get('predicted_peak_hour_next_day', 0)):02d}:00")
+peak_period_label = artifact.get("predicted_peak_time_of_day_label", None)
+peak_hour = int(artifact.get("predicted_peak_hour_next_day", 0))
+if peak_period_label:
+    col4.metric("Predicted Peak Period", str(peak_period_label))
+else:
+    col4.metric("Predicted Peak Period", f"{peak_hour:02d}:00")
 col5.metric("Daily Peak-Hour Model Accuracy", f"{artifact.get('daily_peak_accuracy', 0.0):.3f}")
 
 st.subheader("Best Model Summary")
@@ -149,6 +167,7 @@ st.write(
     pd.DataFrame(
         {
             "latest_timestamp": [artifact.get("latest_timestamp", "--")],
+            "predicted_peak_time_of_day": [artifact.get("predicted_peak_time_of_day_label", "--")],
             "predicted_peak_hour_next_day": [artifact.get("predicted_peak_hour_next_day", "--")],
             "backup_power_time_window": [artifact.get("backup_power_time_window", "--")],
             "predicted_peak": [peak_text],

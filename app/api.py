@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 import pandas as pd
+from typing import Any
 
 from src.config import ARTIFACT_PATH
 from src.pipeline import load_artifacts
-from src.train import run_training, run_training_with_options
+from src.train import run_training_with_options
 
 app = FastAPI(title="Smart Power Forecast API", version="1.0.0")
 
@@ -42,11 +43,7 @@ def train(
 
 @app.get("/forecast")
 def forecast() -> dict:
-    """Return the latest artifact forecast summary (peak hour and backup window).
-
-    This endpoint replaces the older next-6h-specific endpoints and surfaces
-    the artifact's summary fields.
-    """
+    """Return the latest artifact forecast summary."""
     try:
         artifact = load_artifacts(ARTIFACT_PATH)
     except FileNotFoundError:
@@ -63,7 +60,7 @@ def forecast() -> dict:
 
 
 @app.get("/metrics")
-def metrics() -> list[dict[str, object]]:
+def metrics() -> Any:
     try:
         artifact = load_artifacts(ARTIFACT_PATH)
     except FileNotFoundError:
