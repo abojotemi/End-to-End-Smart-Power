@@ -9,43 +9,36 @@ import plotly.express as px
 import streamlit as st
 
 try:
-    from src.config import ARTIFACT_PATH
-    from src.pipeline import (
-        load_artifacts,
-    )
+    from src.config import ARTIFACT_PATH, ARTIFACT_SCHEMA_VERSION
+    from src.electric_power_ml import predict_power
+    from src.pipeline import load_artifacts
     from src.train import run_training_with_options
 except ModuleNotFoundError:
     ROOT_DIR = Path(__file__).resolve().parents[1]
     if str(ROOT_DIR) not in sys.path:
         sys.path.insert(0, str(ROOT_DIR))
 
-    from src.config import ARTIFACT_PATH
-    from src.pipeline import (
-        load_artifacts,
-    )
+    from src.config import ARTIFACT_PATH, ARTIFACT_SCHEMA_VERSION
+    from src.electric_power_ml import predict_power
+    from src.pipeline import load_artifacts
     from src.train import run_training_with_options
 
 st.set_page_config(page_title="Smart Power Usage Forecast", layout="wide")
 st.title("Smart Power Usage Forecasting Dashboard")
 
 st.caption(
-    "Train deep + ensemble models, compare metrics, detect peak periods, and inspect forecast summaries."
+    "Uses the electric_power_ml.ipynb pipeline (minute-level features, "
+    "Ridge / RF / XGBoost / LightGBM / ensemble, time-of-day peak detection)."
 )
 
 with st.sidebar:
     st.header("Configuration")
-    model_profile = st.selectbox(
-        "Model profile",
-        options=["fast", "balanced", "full"],
-        index=0,
-        help="fast = quicker iteration, full = heavier training",
-    )
     max_rows = st.number_input(
         "Max raw rows (0 = all)",
         min_value=0,
-        value=180000,
+        value=0,
         step=10000,
-        help="Use recent rows only for faster retraining",
+        help="Cap rows for faster retraining on Streamlit Cloud; 0 uses full dataset",
     )
 
     run_training_clicked = st.button("Train / Retrain", type="primary")
@@ -58,24 +51,19 @@ def load_or_train(force_retrain: bool = False):
                 # Make sure we do not accidentally keep displaying a stale artifact.
                 ARTIFACT_PATH.unlink(missing_ok=True)
             artifact = run_training_with_options(
-                model_profile=model_profile,
                 max_rows=(None if int(max_rows) == 0 else int(max_rows)),
             )
             st.success(f"✅ Model trained and saved to: {ARTIFACT_PATH}")
             return artifact
     else:
         st.info(f"📦 Loading saved model from: {ARTIFACT_PATH}")
-        try:
-            return load_artifacts(ARTIFACT_PATH)
-        except Exception as exc:
+        loaded = load_artifacts(ARTIFACT_PATH)
+        if loaded.get("training_pipeline") != "electric_power_ml":
             st.warning(
-                f"Saved artifact looks outdated/incompatible ({exc}). Retraining with the current pipeline…"
+                "Saved artifact was trained with an older pipeline. "
+                "Click Train / Retrain to rebuild with electric_power_ml."
             )
-            ARTIFACT_PATH.unlink(missing_ok=True)
-            return run_training_with_options(
-                model_profile=model_profile,
-                max_rows=(None if int(max_rows) == 0 else int(max_rows)),
-            )
+        return loaded
 
 
 if "artifact" not in st.session_state:
@@ -99,6 +87,15 @@ elif ARTIFACT_PATH.exists():
     try:
         artifact = load_or_train(force_retrain=False)
         st.session_state["artifact"] = artifact
+    except ValueError as exc:
+        if "Artifact schema mismatch" in str(exc):
+            st.warning(
+                f"Stale model artifact ({ARTIFACT_SCHEMA_VERSION} required). "
+                "Click **Train / Retrain** to rebuild from electric_power_ml."
+            )
+        else:
+            st.error(f"Failed to load/train pipeline: {exc}")
+        st.stop()
     except Exception as exc:
         st.error(f"Failed to load/train pipeline: {exc}")
         st.stop()
@@ -268,23 +265,14 @@ with inference_tab2:
         custom_features["Voltage"] = voltage
         custom_features["Global_intensity"] = global_intensity
 
-        # Recompute lagged and rolling features based on the new current value
-        # For simplicity, we assume the lags are proportional
-        for lag in [1, 2, 3, 6, 12, 24, 48]:
-            custom_features[f"power_lag_{lag}"] = global_active_power * 0.95**lag
+        # Approximate minute-level lags from the updated power reading.
+        for lag in [1, 2, 3, 5, 10, 30, 60, 1440, 10080]:
+            key = f"lag_{lag}"
+            if key in custom_features.index:
+                custom_features[key] = global_active_power * (0.95 ** min(lag, 120))
 
-        feature_cols = artifact["feature_cols"]
-        custom_features_df = pd.DataFrame([custom_features])[feature_cols]
-
-        best_model = artifact["best_model"]
-        if artifact["best_model_name"] == "Weighted Ensemble":
-            prediction = 0.0
-            for model_name, model in artifact["ensemble_models"].items():
-                prediction += artifact["ensemble_weights"][model_name] * float(
-                    model.predict(custom_features_df)[0]
-                )
-        else:
-            prediction = float(best_model.predict(custom_features_df)[0])
+        custom_features_df = pd.DataFrame([custom_features])
+        prediction = predict_power(custom_features_df, artifact)
         is_peak_pred = prediction >= artifact["peak_threshold"]
 
         st.success("✅ Prediction Generated!")
@@ -300,7 +288,7 @@ with inference_tab2:
         )
         st.info(
             f"📊 With current power at {global_active_power:.2f} kW, "
-            f"the model predicts the upcoming period average will be {prediction:.2f} kW."
+            f"the model predicts active power will be {prediction:.2f} kW."
         )
 
 st.download_button(

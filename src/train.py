@@ -3,56 +3,26 @@ from __future__ import annotations
 
 from .config import (
     ARTIFACT_PATH,
-    ARTIFACT_SCHEMA_VERSION,
     COMPARISON_PATH,
     METRICS_PATH,
     PEAK_PERIODS_PATH,
 )
-from .pipeline import (
-    build_model_frame,
-    load_raw_data,
-    predict_next_6_hours,
-    preprocess_hourly,
-    save_artifacts,
-    train_and_evaluate,
-)
+from .electric_power_ml import train_electric_power_models
+from .pipeline import load_artifacts, predict_next_6_hours, save_artifacts
 
 
 def run_training() -> dict:
-    raw_df = load_raw_data()
-    df_hourly = preprocess_hourly(raw_df)
-    model_df = build_model_frame(df_hourly)
-
-    trained = train_and_evaluate(model_df, df_hourly)
-    trained["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
-
-    METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    trained["results_df"].to_csv(METRICS_PATH, index=False)
-    trained["comparison_df"].to_csv(COMPARISON_PATH)
-    trained["peak_periods"].to_csv(PEAK_PERIODS_PATH)
-
-    save_artifacts(ARTIFACT_PATH, trained)
-    return trained
+    return run_training_with_options()
 
 
 def run_training_with_options(
     data_path: str | None = None,
-    model_profile: str = "balanced",
+    model_profile: str = "balanced",  # kept for API compatibility; unused
     max_rows: int | None = None,
 ) -> dict:
-    raw_df = load_raw_data(data_path)
-    if max_rows is not None and max_rows > 0 and len(raw_df) > max_rows:
-        raw_df = raw_df.tail(max_rows).copy()
+    del model_profile  # electric_power_ml.ipynb does not use note.ipynb profiles
 
-    df_hourly = preprocess_hourly(raw_df)
-    model_df = build_model_frame(df_hourly)
-
-    trained = train_and_evaluate(
-        model_df,
-        df_hourly,
-        model_profile=model_profile,
-    )
-    trained["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
+    trained = train_electric_power_models(data_path=data_path, max_rows=max_rows)
 
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     trained["results_df"].to_csv(METRICS_PATH, index=False)
@@ -79,5 +49,5 @@ if __name__ == "__main__":
     if "model_paths" in output:
         for name, path in output["model_paths"].items():
             print(f"- {name}: {path}")
-    print("Next-6-hour forecast and peak-hour recommendation:")
+    print("Forecast summary:")
     print(next_6h)
