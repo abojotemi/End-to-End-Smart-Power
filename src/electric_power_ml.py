@@ -56,23 +56,8 @@ def _fetch_uci_household_power() -> pd.DataFrame:
     return features.copy()
 
 
-def load_raw_dataframe(data_path: Path | str | None = None) -> pd.DataFrame:
+def load_raw_dataframe() -> pd.DataFrame:
     """Load household power data from a local CSV or UCI (for cloud deploys)."""
-    if data_path is not None:
-        path = Path(data_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Data file not found: {path}")
-        return pd.read_csv(path, delimiter=";", low_memory=False)
-
-    if DATA_DIR.exists():
-        candidates = sorted(DATA_DIR.glob("*.csv"))
-        if candidates:
-            return pd.read_csv(candidates[0], delimiter=";", low_memory=False)
-
-    default_csv = DATA_DIR / "household_power_consumption.csv"
-    if default_csv.exists():
-        return pd.read_csv(default_csv, delimiter=";", low_memory=False)
-
     return _fetch_uci_household_power()
 
 
@@ -234,7 +219,7 @@ def train_electric_power_models(
     if lgb is None:
         raise RuntimeError("lightgbm is required for electric_power_ml training")
 
-    raw_df = load_raw_dataframe(data_path)
+    raw_df = load_raw_dataframe()
     if max_rows is not None and max_rows > 0 and len(raw_df) > max_rows:
         raw_df = raw_df.tail(max_rows).copy()
 
