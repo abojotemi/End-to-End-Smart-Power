@@ -210,7 +210,6 @@ def _export_models(
 
 
 def train_electric_power_models(
-    data_path: str | None = None,
     max_rows: int | None = None,
 ) -> dict[str, Any]:
     """Train using the same logic as electric_power_ml.ipynb."""

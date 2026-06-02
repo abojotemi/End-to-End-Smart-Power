@@ -16,13 +16,12 @@ def run_training() -> dict:
 
 
 def run_training_with_options(
-    data_path: str | None = None,
     model_profile: str = "balanced",  # kept for API compatibility; unused
     max_rows: int | None = None,
 ) -> dict:
     del model_profile  # electric_power_ml.ipynb does not use note.ipynb profiles
 
-    trained = train_electric_power_models(data_path=data_path, max_rows=max_rows)
+    trained = train_electric_power_models(max_rows=max_rows)
 
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     trained["results_df"].to_csv(METRICS_PATH, index=False)
