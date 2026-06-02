@@ -136,7 +136,7 @@ summary_cols[2].metric("MAE", f"{float(best_metrics.get('MAE', 0.0)):.4f}")
 summary_cols[3].metric("MAPE", f"{float(best_metrics.get('MAPE', 0.0)):.2f}%")
 
 st.subheader("Model Comparison")
-st.dataframe(results_df, use_container_width=True)
+st.dataframe(results_df, width='stretch')
 
 
 st.subheader("Actual vs Predicted (Test Window)")
@@ -151,13 +151,13 @@ line_fig = px.line(
     },
 )
 line_fig.add_hline(y=artifact["peak_threshold"], line_dash="dash", line_color="red")
-st.plotly_chart(line_fig, use_container_width=True)
+st.plotly_chart(line_fig, width='stretch')
 
 st.subheader("Detected Peak Periods")
 if peak_periods_df.empty:
     st.info("No peak periods detected for the selected threshold.")
 else:
-    st.dataframe(peak_periods_df.head(50), use_container_width=True)
+    st.dataframe(peak_periods_df.head(50), width='stretch')
 
     scatter = px.scatter(
         peak_periods_df,
@@ -166,7 +166,7 @@ else:
         title="Peak Period Points",
         labels={"actual": "Actual Power (kW)", "datetime": "Time"},
     )
-    st.plotly_chart(scatter, use_container_width=True)
+    st.plotly_chart(scatter, width='stretch')
 
 st.subheader("Operational Insight")
 peak_text = "Yes" if artifact.get("predicted_peak", False) else "No"
