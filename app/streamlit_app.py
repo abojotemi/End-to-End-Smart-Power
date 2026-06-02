@@ -46,6 +46,12 @@ with st.sidebar:
 
 def load_or_train(force_retrain: bool = False):
     if force_retrain or not ARTIFACT_PATH.exists():
+        data_dir = Path(__file__).resolve().parents[1] / "data"
+        if not data_dir.exists() or not any(data_dir.glob("*.csv")):
+            st.info(
+                "No local `data/*.csv` found — downloading the UCI Household Power "
+                "dataset. First training may take several minutes."
+            )
         with st.spinner("Training models..."):
             if force_retrain:
                 # Make sure we do not accidentally keep displaying a stale artifact.

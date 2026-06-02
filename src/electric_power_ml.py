@@ -45,25 +45,35 @@ ENSEMBLE_MODEL_NAME = "Weighted Ensemble"
 STACKING_MODEL_NAME = "StackingEnsemble"
 
 
-def _resolve_dataset_path(data_path: Path | str | None = None) -> Path:
+def _fetch_uci_household_power() -> pd.DataFrame:
+    """Download UCI Household Power Consumption (id=235) when no local CSV exists."""
+    from ucimlrepo import fetch_ucirepo
+
+    dataset = fetch_ucirepo(id=235)
+    features = dataset.data.features if dataset.data is not None else None
+    if features is None:
+        raise RuntimeError("UCI dataset fetch returned no feature data")
+    return features.copy()
+
+
+def load_raw_dataframe(data_path: Path | str | None = None) -> pd.DataFrame:
+    """Load household power data from a local CSV or UCI (for cloud deploys)."""
     if data_path is not None:
         path = Path(data_path)
         if not path.exists():
             raise FileNotFoundError(f"Data file not found: {path}")
-        return path
+        return pd.read_csv(path, delimiter=";", low_memory=False)
 
-    if not DATA_DIR.exists():
-        raise FileNotFoundError(f"Data directory not found: {DATA_DIR}")
+    if DATA_DIR.exists():
+        candidates = sorted(DATA_DIR.glob("*.csv"))
+        if candidates:
+            return pd.read_csv(candidates[0], delimiter=";", low_memory=False)
 
-    candidates = sorted(DATA_DIR.glob("*.csv"))
-    if not candidates:
-        raise FileNotFoundError(f"No CSV files found in {DATA_DIR}")
-    return candidates[0]
+    default_csv = DATA_DIR / "household_power_consumption.csv"
+    if default_csv.exists():
+        return pd.read_csv(default_csv, delimiter=";", low_memory=False)
 
-
-def load_raw_dataframe(data_path: Path | str | None = None) -> pd.DataFrame:
-    path = _resolve_dataset_path(data_path)
-    return pd.read_csv(path, delimiter=";", low_memory=False)
+    return _fetch_uci_household_power()
 
 
 def clean_dataframe(raw_df: pd.DataFrame) -> pd.DataFrame:
