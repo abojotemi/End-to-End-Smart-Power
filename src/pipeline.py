@@ -28,6 +28,7 @@ from sklearn.preprocessing import StandardScaler
 
 from .config import DATA_DIR, RANDOM_STATE
 from .config import MODEL_EXPORT_DIR
+from .config import ARTIFACT_SCHEMA_VERSION
 
 try:
     from xgboost import XGBRegressor
@@ -934,4 +935,14 @@ def load_artifacts(artifact_path: Path | str) -> dict[str, Any]:
     artifact_path = Path(artifact_path)
     if not artifact_path.exists():
         raise FileNotFoundError(f"Model artifact not found at: {artifact_path}")
-    return joblib.load(artifact_path)
+    payload = joblib.load(artifact_path)
+    if not isinstance(payload, dict):
+        raise ValueError("Artifact payload is not a dict (unexpected format)")
+
+    version = payload.get("artifact_schema_version")
+    if version != ARTIFACT_SCHEMA_VERSION:
+        raise ValueError(
+            f"Artifact schema mismatch: found {version!r}, expected {ARTIFACT_SCHEMA_VERSION!r}"
+        )
+
+    return payload

@@ -12,3 +12,7 @@ COMPARISON_PATH = REPORTS_DIR / "test_comparison.csv"
 PEAK_PERIODS_PATH = REPORTS_DIR / "peak_periods.csv"
 
 RANDOM_STATE = 42
+
+# Bump this whenever you change the training/payload schema.
+# Streamlit/API will refuse to load older artifacts and will retrain instead.
+ARTIFACT_SCHEMA_VERSION = "electric_power_ml_v1"

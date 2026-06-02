@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .config import (
     ARTIFACT_PATH,
+    ARTIFACT_SCHEMA_VERSION,
     COMPARISON_PATH,
     METRICS_PATH,
     PEAK_PERIODS_PATH,
@@ -23,6 +24,7 @@ def run_training() -> dict:
     model_df = build_model_frame(df_hourly)
 
     trained = train_and_evaluate(model_df, df_hourly)
+    trained["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
 
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     trained["results_df"].to_csv(METRICS_PATH, index=False)
@@ -50,6 +52,7 @@ def run_training_with_options(
         df_hourly,
         model_profile=model_profile,
     )
+    trained["artifact_schema_version"] = ARTIFACT_SCHEMA_VERSION
 
     METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
     trained["results_df"].to_csv(METRICS_PATH, index=False)

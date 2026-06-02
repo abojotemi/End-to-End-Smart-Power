@@ -65,7 +65,17 @@ def load_or_train(force_retrain: bool = False):
             return artifact
     else:
         st.info(f"📦 Loading saved model from: {ARTIFACT_PATH}")
-        return load_artifacts(ARTIFACT_PATH)
+        try:
+            return load_artifacts(ARTIFACT_PATH)
+        except Exception as exc:
+            st.warning(
+                f"Saved artifact looks outdated/incompatible ({exc}). Retraining with the current pipeline…"
+            )
+            ARTIFACT_PATH.unlink(missing_ok=True)
+            return run_training_with_options(
+                model_profile=model_profile,
+                max_rows=(None if int(max_rows) == 0 else int(max_rows)),
+            )
 
 
 if "artifact" not in st.session_state:
