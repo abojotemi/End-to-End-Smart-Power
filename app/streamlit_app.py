@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import sys
 from pathlib import Path
 
@@ -9,8 +8,8 @@ import plotly.express as px
 import streamlit as st
 
 try:
-    from src.config import ARTIFACT_PATH, ARTIFACT_SCHEMA_VERSION
-    from src.electric_power_ml import predict_power
+    from src.config import artifact_path_for_interval, ARTIFACT_SCHEMA_VERSION, SUPPORTED_INTERVALS
+    from src.electric_power_ml_multi import predict_power
     from src.pipeline import load_artifacts
     from src.train import run_training_with_options
 except ModuleNotFoundError:
@@ -18,8 +17,8 @@ except ModuleNotFoundError:
     if str(ROOT_DIR) not in sys.path:
         sys.path.insert(0, str(ROOT_DIR))
 
-    from src.config import ARTIFACT_PATH, ARTIFACT_SCHEMA_VERSION
-    from src.electric_power_ml import predict_power
+    from src.config import artifact_path_for_interval, ARTIFACT_SCHEMA_VERSION, SUPPORTED_INTERVALS
+    from src.electric_power_ml_multi import predict_power
     from src.pipeline import load_artifacts
     from src.train import run_training_with_options
 
@@ -27,12 +26,17 @@ st.set_page_config(page_title="Smart Power Usage Forecast", layout="wide")
 st.title("Smart Power Usage Forecasting Dashboard")
 
 st.caption(
-    "Uses the electric_power_ml.ipynb pipeline (minute-level features, "
-    "Ridge / RF / XGBoost / LightGBM / ensemble, time-of-day peak detection)."
+    "Uses the multi-interval pipeline (Ridge / RF / XGBoost / LightGBM / ensemble, time-of-day peak detection)."
 )
 
 with st.sidebar:
     st.header("Configuration")
+    selected_interval = st.selectbox(
+        "Select Time Interval",
+        options=SUPPORTED_INTERVALS,
+        index=SUPPORTED_INTERVALS.index("1hr") if "1hr" in SUPPORTED_INTERVALS else 0
+    )
+    
     max_rows = st.number_input(
         "Max raw rows (0 = all)",
         min_value=0,
@@ -41,39 +45,50 @@ with st.sidebar:
         help="Cap rows for faster retraining on Streamlit Cloud; 0 uses full dataset",
     )
 
-    run_training_clicked = st.button("Train / Retrain", type="primary")
+    run_training_clicked = st.button("Train / Retrain All Intervals", type="primary")
 
 
-def load_or_train(force_retrain: bool = False):
-    if force_retrain or not ARTIFACT_PATH.exists():
-        with st.spinner("Training models..."):
+def load_or_train(interval_key: str, force_retrain: bool = False):
+    artifact_path = artifact_path_for_interval(interval_key)
+    if force_retrain or not artifact_path.exists():
+        with st.spinner("Training models for all intervals..."):
             if force_retrain:
-                # Make sure we do not accidentally keep displaying a stale artifact.
-                ARTIFACT_PATH.unlink(missing_ok=True)
-            artifact = run_training_with_options(
+                for k in SUPPORTED_INTERVALS:
+                    artifact_path_for_interval(k).unlink(missing_ok=True)
+            all_artifacts = run_training_with_options(
                 max_rows=(None if int(max_rows) == 0 else int(max_rows)),
             )
-            st.success(f"✅ Model trained and saved to: {ARTIFACT_PATH}")
-            return artifact
+            st.success(f"✅ Models trained and saved.")
+            return all_artifacts[interval_key]
     else:
-        st.info(f"📦 Loading saved model from: {ARTIFACT_PATH}")
-        loaded = load_artifacts(ARTIFACT_PATH)
-        if loaded.get("training_pipeline") != "electric_power_ml":
+        st.info(f"📦 Loading saved model from: {artifact_path}")
+        loaded = load_artifacts(artifact_path)
+        if loaded.get("training_pipeline") != "electric_power_ml_multi":
             st.warning(
                 "Saved artifact was trained with an older pipeline. "
-                "Click Train / Retrain to rebuild with electric_power_ml."
+                "Click Train / Retrain to rebuild with electric_power_ml_multi."
             )
         return loaded
 
+
+# Track the current interval so we can clear cache if it changes
+if "current_interval" not in st.session_state:
+    st.session_state["current_interval"] = selected_interval
+
+if st.session_state["current_interval"] != selected_interval:
+    st.session_state["artifact"] = None
+    st.session_state["current_interval"] = selected_interval
 
 if "artifact" not in st.session_state:
     st.session_state["artifact"] = None
 
 
 artifact = None
+artifact_path = artifact_path_for_interval(selected_interval)
+
 if run_training_clicked:
     try:
-        artifact = load_or_train(force_retrain=True)
+        artifact = load_or_train(selected_interval, force_retrain=True)
         st.session_state["artifact"] = artifact
     except Exception as exc:
         st.error(f"Failed to load/train pipeline: {exc}")
@@ -81,17 +96,17 @@ if run_training_clicked:
 
 elif st.session_state["artifact"] is not None:
     artifact = st.session_state["artifact"]
-    st.success("✅ Showing the latest trained model from this session.")
+    st.success(f"✅ Showing the latest trained model for {selected_interval} from this session.")
 
-elif ARTIFACT_PATH.exists():
+elif artifact_path.exists():
     try:
-        artifact = load_or_train(force_retrain=False)
+        artifact = load_or_train(selected_interval, force_retrain=False)
         st.session_state["artifact"] = artifact
     except ValueError as exc:
         if "Artifact schema mismatch" in str(exc):
             st.warning(
                 f"Stale model artifact ({ARTIFACT_SCHEMA_VERSION} required). "
-                "Click **Train / Retrain** to rebuild from electric_power_ml."
+                "Click **Train / Retrain** to rebuild from electric_power_ml_multi."
             )
         else:
             st.error(f"Failed to load/train pipeline: {exc}")
@@ -128,7 +143,7 @@ else:
     col4.metric("Predicted Peak Period", f"{peak_hour:02d}:00")
 col5.metric("Daily Peak-Hour Model Accuracy", f"{artifact.get('daily_peak_accuracy', 0.0):.3f}")
 
-st.subheader("Best Model Summary")
+st.subheader(f"Best Model Summary ({selected_interval})")
 summary_cols = st.columns(4)
 summary_cols[0].metric("R²", f"{float(best_metrics.get('R2', 0.0)):.4f}")
 summary_cols[1].metric("RMSE", f"{float(best_metrics.get('RMSE', 0.0)):.4f}")
@@ -294,6 +309,6 @@ with inference_tab2:
 st.download_button(
     label="Download metrics CSV",
     data=results_df.to_csv(index=False),
-    file_name="model_metrics.csv",
+    file_name=f"model_metrics_{selected_interval}.csv",
     mime="text/csv",
 )

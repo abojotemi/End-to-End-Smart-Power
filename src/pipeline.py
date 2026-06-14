@@ -909,6 +909,14 @@ def predict_next_6_hours(
             latest_features = latest_features.to_frame().T
         prediction = predict_power(latest_features, artifact)
         peak_hour = int(artifact.get("predicted_peak_hour_next_day", 0))
+    elif artifact.get("training_pipeline") == "electric_power_ml_multi":
+        from .electric_power_ml_multi import predict_power
+
+        latest_features = artifact["latest_features"]
+        if isinstance(latest_features, pd.Series):
+            latest_features = latest_features.to_frame().T
+        prediction = predict_power(latest_features, artifact)
+        peak_hour = int(artifact.get("predicted_peak_hour_next_day", 0))
         backup_window = artifact.get(
             "backup_power_time_window",
             f"{peak_hour:02d}:00 - {peak_hour:02d}:59",
