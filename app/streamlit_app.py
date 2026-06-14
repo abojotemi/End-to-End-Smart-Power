@@ -55,11 +55,11 @@ def load_or_train(interval_key: str, force_retrain: bool = False):
             if force_retrain:
                 for k in SUPPORTED_INTERVALS:
                     artifact_path_for_interval(k).unlink(missing_ok=True)
-            all_artifacts = run_training_with_options(
+            run_training_with_options(
                 max_rows=(None if int(max_rows) == 0 else int(max_rows)),
             )
             st.success(f"✅ Models trained and saved.")
-            return all_artifacts[interval_key]
+            return load_artifacts(artifact_path)
     else:
         st.info(f"📦 Loading saved model from: {artifact_path}")
         loaded = load_artifacts(artifact_path)
