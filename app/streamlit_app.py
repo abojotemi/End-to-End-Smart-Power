@@ -126,6 +126,14 @@ if artifact is None:
     st.stop()
 
 results_df = artifact["results_df"].copy()
+
+# Remove StackingEnsemble and accuracy columns from display
+results_df = results_df[results_df["Model"] != "StackingEnsemble"]
+cols_to_drop = [c for c in ["Relative_Accuracy", "Accuracy"] if c in results_df.columns]
+if cols_to_drop:
+    results_df = results_df.drop(columns=cols_to_drop)
+results_df = results_df.reset_index(drop=True)
+
 comparison_df = artifact["comparison_df"].copy().reset_index()
 peak_periods_df = artifact["peak_periods"].copy().reset_index()
 best_metrics = artifact.get("best_metrics", results_df.iloc[0].to_dict())
@@ -151,7 +159,7 @@ summary_cols[2].metric("MAE", f"{float(best_metrics.get('MAE', 0.0)):.4f}")
 summary_cols[3].metric("MAPE", f"{float(best_metrics.get('MAPE', 0.0)):.2f}%")
 
 st.subheader("Model Comparison")
-st.dataframe(results_df, width='stretch')
+st.dataframe(results_df, use_container_width=True)
 
 
 st.subheader("Actual vs Predicted (Test Window)")
@@ -166,13 +174,13 @@ line_fig = px.line(
     },
 )
 line_fig.add_hline(y=artifact["peak_threshold"], line_dash="dash", line_color="red")
-st.plotly_chart(line_fig, width='stretch')
+st.plotly_chart(line_fig, use_container_width=True)
 
 st.subheader("Detected Peak Periods")
 if peak_periods_df.empty:
     st.info("No peak periods detected for the selected threshold.")
 else:
-    st.dataframe(peak_periods_df.head(50), width='stretch')
+    st.dataframe(peak_periods_df.head(50), use_container_width=True)
 
     scatter = px.scatter(
         peak_periods_df,
@@ -181,7 +189,7 @@ else:
         title="Peak Period Points",
         labels={"actual": "Actual Power (kW)", "datetime": "Time"},
     )
-    st.plotly_chart(scatter, width='stretch')
+    st.plotly_chart(scatter, use_container_width=True)
 
 st.subheader("Operational Insight")
 peak_text = "Yes" if artifact.get("predicted_peak", False) else "No"

@@ -229,8 +229,6 @@ def _summarize_metrics(name: str, y_true: np.ndarray, y_pred: np.ndarray) -> dic
         "R2": float(r2_score(y_true, y_pred)),
         "MAPE": float(np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + 1e-8))) * 100),
         "RAE": rae,
-        "Relative_Accuracy": float(1.0 - rae),
-        "Accuracy": float((1.0 - rae) * 100),
     }
 
 
@@ -362,7 +360,6 @@ def train_for_interval(
         "RandomForest": y_pred_rf,
         "XGBoost": y_pred_xgb,
         "LightGBM": y_pred_lgb,
-        STACKING_MODEL_NAME: y_pred_stack,
         ENSEMBLE_MODEL_NAME: y_pred_weighted,
     }
 
@@ -380,7 +377,7 @@ def train_for_interval(
     ensemble_weights = {name: 0.0 for name in ensemble_models}
     ensemble_weights.update({"RandomForest": 1 / 3, "XGBoost": 1 / 3, "LightGBM": 1 / 3})
 
-    if best_model_name in {ENSEMBLE_MODEL_NAME, STACKING_MODEL_NAME}:
+    if best_model_name == ENSEMBLE_MODEL_NAME:
         best_model = None
         app_best_model_name = ENSEMBLE_MODEL_NAME
     else:
