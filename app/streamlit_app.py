@@ -191,19 +191,7 @@ else:
     )
     st.plotly_chart(scatter, use_container_width=True)
 
-st.subheader("Operational Insight")
-peak_text = "Yes" if artifact.get("predicted_peak", False) else "No"
-st.write(
-    pd.DataFrame(
-        {
-            "latest_timestamp": [artifact.get("latest_timestamp", "--")],
-            "predicted_peak_time_of_day": [artifact.get("predicted_peak_time_of_day_label", "--")],
-            "predicted_peak_hour_next_day": [artifact.get("predicted_peak_hour_next_day", "--")],
-            "backup_power_time_window": [artifact.get("backup_power_time_window", "--")],
-            "predicted_peak": [peak_text],
-        }
-    )
-)
+
 
 # ============================================================================
 # INFERENCE SECTION
